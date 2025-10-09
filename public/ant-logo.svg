@@ -1,0 +1,9 @@
+<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="AI Neural">
+  <rect width="40" height="40" rx="20" fill="#18181B"/>
+  <g stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <circle cx="13" cy="20" r="3"/>
+    <circle cx="27" cy="14" r="3"/>
+    <circle cx="27" cy="26" r="3"/>
+    <path d="M16 20h8M25.6 15.4l-7.2 3.2M25.6 24.6l-7.2-3.2"/>
+  </g>
+</svg>
