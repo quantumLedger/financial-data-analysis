@@ -228,11 +228,11 @@ export default function FloatingSpreadsheetLauncher({
   })();
 
   const isDark = (() => {
-    if (theme === "dark") return true;
+    if (theme === "dark") return false;
     if (theme === "light") return false;
     // auto – respect prefers-color-scheme
     if (typeof window !== "undefined") {
-      return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
     }
     return false;
   })();
