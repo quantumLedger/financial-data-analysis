@@ -90,7 +90,7 @@ enum PORTFOLIO_TYPE {
   MASTER_PROPOSED = "MASTER_PROPOSED",
 }
 
-const API_URL ="https://apis.weidentify.ai/";
+const API_URL ="https://apis.weidentify.ai";
 
 async function fetchCombinedCSVsByFirm(
   clientId: string,

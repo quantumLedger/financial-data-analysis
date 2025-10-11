@@ -228,7 +228,7 @@ export default function FloatingSpreadsheetLauncher({
   })();
 
   const isDark = (() => {
-    if (theme === "dark") return false;
+    if (theme === "dark") return true;
     if (theme === "light") return false;
     // auto – respect prefers-color-scheme
     if (typeof window !== "undefined") {
