@@ -16,10 +16,6 @@ export default function Home() {
        <IcfProvider>
         {/* <IcfDebugBadge /> */}
         <div>
-
-          <div style={{marginTop: 200}}>
-            <h1>Hi there</h1>
-          </div>
           <FloatingSpreadsheetLauncher
             initialData={[
               { Ticker: "AAPL", Price: 227.3, Qty: 10 },
@@ -35,8 +31,8 @@ export default function Home() {
             anchor="bottom-right"
             dialogWidth={900}
             dialogHeight={560}
-            theme="auto"
-            sheetName="Portfolio"
+            theme="light"
+            sheetName="Portfolio Analyst"
           />
         </div>
         

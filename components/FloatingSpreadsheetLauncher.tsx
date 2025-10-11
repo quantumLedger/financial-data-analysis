@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
+import React, { useMemo, useRef, useState, useCallback } from "react";
 import { BarChart3, X } from "lucide-react";
 import {
   DialogComponent,

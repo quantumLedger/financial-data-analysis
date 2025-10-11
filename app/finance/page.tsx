@@ -90,10 +90,7 @@ enum PORTFOLIO_TYPE {
   MASTER_PROPOSED = "MASTER_PROPOSED",
 }
 
-const API_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:5555";
+const API_URL ="https://apis.weidentify.ai/";
 
 async function fetchCombinedCSVsByFirm(
   clientId: string,
