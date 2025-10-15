@@ -38,10 +38,46 @@ import {
   readFileAsBase64,
   readFileAsPDFText,
 } from "@/utils/fileHandling";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 type ChartMsg = ChartData;
+
+const mdComponents: Components = {
+  h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mt-3" {...props} />,
+  h3: ({ node, ...props }) => <h3 className="text-base font-semibold mt-2" {...props} />,
+  ul: ({ node, ...props }) => <ul className="list-disc pl-5 my-2" {...props} />,
+  ol: ({ node, ...props }) => <ol className="list-decimal pl-5 my-2" {...props} />,
+  table: ({ node, ...props }) => (
+    <div className="overflow-x-auto my-3">
+      <table className="w-full border-collapse" {...props} />
+    </div>
+  ),
+  th: ({ node, ...props }) => (
+    <th className="border px-2 py-1 text-left bg-background/50" {...props} />
+  ),
+  td: ({ node, ...props }) => (
+    <td className="border px-2 py-1 align-top" {...props} />
+  ),
+  blockquote: ({ node, ...props }) => (
+    <blockquote className="border-l-4 pl-3 italic text-sm opacity-90 my-2" {...props} />
+  ),
+  // ✅ Properly typed `code` renderer; now `inline` is recognized
+  code({ node, inline, className, children, ...props }) {
+    if (inline) {
+      return (
+        <code className="bg-background/50 px-1 py-0.5 rounded" {...props}>
+          {children}
+        </code>
+      );
+    }
+    return (
+      <pre className="bg-background/50 p-3 rounded overflow-auto my-2" {...props}>
+        <code className={className}>{children}</code>
+      </pre>
+    );
+  },
+};
 
 interface Message {
   id: string;
@@ -162,50 +198,7 @@ const MessageComponent: React.FC<MessageComponentProps> = ({ message }) => {
               <span>Thinking...</span>
             </div>
           ) : (
-             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                h2: ({ node, ...props }) => (
-                  <h2 className="text-lg font-semibold mt-3" {...props} />
-                ),
-                h3: ({ node, ...props }) => (
-                  <h3 className="text-base font-semibold mt-2" {...props} />
-                ),
-                ul: ({ node, ...props }) => (
-                  <ul className="list-disc pl-5 my-2" {...props} />
-                ),
-                ol: ({ node, ...props }) => (
-                  <ol className="list-decimal pl-5 my-2" {...props} />
-                ),
-                table: ({ node, ...props }) => (
-                  <div className="overflow-x-auto my-3">
-                    <table className="w-full border-collapse" {...props} />
-                  </div>
-                ),
-                th: ({ node, ...props }) => (
-                  <th className="border px-2 py-1 text-left bg-background/50" {...props} />
-                ),
-                td: ({ node, ...props }) => (
-                  <td className="border px-2 py-1 align-top" {...props} />
-                ),
-                code: ({ inline, className, children, ...props }) =>
-                  inline ? (
-                    <code className="bg-background/50 px-1 py-0.5 rounded" {...props}>
-                      {children}
-                    </code>
-                  ) : (
-                    <pre className="bg-background/50 p-3 rounded overflow-auto my-2" {...props}>
-                      <code className={className}>{children}</code>
-                    </pre>
-                  ),
-                blockquote: ({ node, ...props }) => (
-                  <blockquote
-                    className="border-l-4 pl-3 italic text-sm opacity-90 my-2"
-                    {...props}
-                  />
-                ),
-              }}
-            >
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
               {message.content}
             </ReactMarkdown>
           )}
