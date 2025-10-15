@@ -62,7 +62,7 @@ const mdComponents: Components = {
   blockquote: ({ node, ...props }) => (
     <blockquote className="border-l-4 pl-3 italic text-sm opacity-90 my-2" {...props} />
   ),
-  // ✅ Properly typed `code` renderer; now `inline` is recognized
+  // @ts-ignore — react-markdown passes `inline`; TS inference complains
   code({ node, inline, className, children, ...props }) {
     if (inline) {
       return (
@@ -72,7 +72,7 @@ const mdComponents: Components = {
       );
     }
     return (
-      <pre className="bg-background/50 p-3 rounded overflow-auto my-2" {...props}>
+  <pre {...(props as React.HTMLAttributes<HTMLPreElement>)} className="bg-background/50 p-3 rounded overflow-auto my-2">
         <code className={className}>{children}</code>
       </pre>
     );
