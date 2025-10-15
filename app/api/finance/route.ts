@@ -44,14 +44,7 @@ const tools: ToolSchema[] = [
       properties: {
         chartType: {
           type: "string" as const,
-          enum: [
-            "bar",
-            "multiBar",
-            "line",
-            "pie",
-            "area",
-            "stackedArea",
-          ] as const,
+          enum: ["bar", "multiBar", "line", "pie", "area", "stackedArea"] as const,
           description: "The type of chart to generate",
         },
         config: {
@@ -212,14 +205,21 @@ export async function POST(req: NextRequest) {
       ),
     });
 
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: 4096,
-      temperature: 0.7,
-      tools: tools,
-      tool_choice: { type: "auto" },
-      messages: anthropicMessages,
-      system: `You are a financial data visualization expert. Your role is to analyze financial data and create clear, meaningful visualizations using generate_graph_data tool:
+    // Strong Markdown-focused system prompt
+    const systemPrompt = `You are a financial data visualization expert. Your role is to analyze financial data and create clear, meaningful visualizations using the generate_graph_data tool.
+
+OUTPUT RULES (VERY IMPORTANT):
+- Always answer in **Markdown**.
+- Use clear section headings (## Heading), short paragraphs, and bullet lists.
+- Prefer **tables** for side-by-side comparisons (allocations, top holdings, period deltas).
+- Use callouts/tips (e.g., > **Note:**) for caveats and assumptions.
+- Include concise, actionable insights and a brief “What this means” summary.
+- When you show code/data, use fenced blocks (e.g., \`\`\`json).
+- Do NOT paste the tool’s raw JSON directly; use the tool to create charts and summarize insights in Markdown.
+
+CHARTING GUIDANCE:
+- Pick the most appropriate chart type (bar, multiBar, line, pie, area, stackedArea).
+- Summaries should reference the chart by name (e.g., “**Top 10 Holdings (Bar)**”).
 
 Here are the chart types available and their ideal use cases:
 
@@ -260,73 +260,24 @@ When generating visualizations:
 4. Add contextual footer notes
 5. Use proper data keys that reflect the actual metrics
 
-Data Structure Examples:
-
-For Time-Series (Line/Bar/Area):
-{
-  data: [
-    { period: "Q1 2024", revenue: 1250000 },
-    { period: "Q2 2024", revenue: 1450000 }
-  ],
-  config: {
-    xAxisKey: "period",
-    title: "Quarterly Revenue",
-    description: "Revenue growth over time"
-  },
-  chartConfig: {
-    revenue: { label: "Revenue ($)" }
-  }
-}
-
-For Comparisons (MultiBar):
-{
-  data: [
-    { category: "Product A", sales: 450000, costs: 280000 },
-    { category: "Product B", sales: 650000, costs: 420000 }
-  ],
-  config: {
-    xAxisKey: "category",
-    title: "Product Performance",
-    description: "Sales vs Costs by Product"
-  },
-  chartConfig: {
-    sales: { label: "Sales ($)" },
-    costs: { label: "Costs ($)" }
-  }
-}
-
-For Distributions (Pie):
-{
-  data: [
-    { segment: "Equities", value: 5500000 },
-    { segment: "Bonds", value: 3200000 }
-  ],
-  config: {
-    xAxisKey: "segment",
-    title: "Portfolio Allocation",
-    description: "Current investment distribution",
-    totalLabel: "Total Assets"
-  },
-  chartConfig: {
-    equities: { label: "Equities" },
-    bonds: { label: "Bonds" }
-  }
-}
-
 Always:
 - Generate real, contextually appropriate data
 - Use proper financial formatting
 - Include relevant trends and insights
 - Structure data exactly as needed for the chosen chart type
 - Choose the most appropriate visualization for the data
-
-Never:
-- Use placeholder or static data
-- Announce the tool usage
-- Include technical implementation details in responses
 - NEVER SAY you are using the generate_graph_data tool, just execute it when needed.
 
-Focus on clear financial insights and let the visualization enhance understanding.`,
+Focus on clear financial insights and let the visualization enhance understanding.`;
+
+    const response = await anthropic.messages.create({
+      model,
+      max_tokens: 4096,
+      temperature: 0.7,
+      tools: tools,
+      tool_choice: { type: "auto" },
+      messages: anthropicMessages,
+      system: systemPrompt,
     });
 
     console.log("✅ Claude API Response received:", {
@@ -336,7 +287,7 @@ Focus on clear financial insights and let the visualization enhance understandin
       contentTypes: response.content.map((c) => c.type),
       contentLength:
         response.content[0].type === "text"
-          ? response.content[0].text.length
+          ? (response.content[0] as any).text.length
           : 0,
       toolOutput: response.content.find((c) => c.type === "tool_use")
         ? JSON.stringify(
@@ -366,20 +317,20 @@ Focus on clear financial insights and let the visualization enhance understandin
       // Transform data for pie charts to match expected structure
       if (chartData.chartType === "pie") {
         // Ensure data items have 'segment' and 'value' keys
-        chartData.data = chartData.data.map((item) => {
+        chartData.data = chartData.data.map((item: any) => {
           // Find the first key in chartConfig (e.g., 'sales')
           const valueKey = Object.keys(chartData.chartConfig)[0];
-          const segmentKey = chartData.config.xAxisKey || "segment";
+          const segmentKey = (chartData.config as any).xAxisKey || "segment";
 
           return {
             segment:
               item[segmentKey] || item.segment || item.category || item.name,
-            value: item[valueKey] || item.value,
+            value: (item as any)[valueKey] ?? (item as any).value,
           };
         });
 
         // Ensure xAxisKey is set to 'segment' for consistency
-        chartData.config.xAxisKey = "segment";
+        (chartData.config as any).xAxisKey = "segment";
       }
 
       // Create new chartConfig with system color variables
@@ -387,17 +338,17 @@ Focus on clear financial insights and let the visualization enhance understandin
         (acc, [key, config], index) => ({
           ...acc,
           [key]: {
-            ...config,
+            ...(config as Record<string, unknown>),
             // Assign color variables sequentially
             color: `hsl(var(--chart-${index + 1}))`,
           },
         }),
-        {},
+        {} as Record<string, unknown>,
       );
 
       return {
         ...chartData,
-        chartConfig: processedChartConfig,
+        chartConfig: processedChartConfig as any,
       };
     };
 
@@ -407,7 +358,7 @@ Focus on clear financial insights and let the visualization enhance understandin
 
     return new Response(
       JSON.stringify({
-        content: textContent?.text || "",
+        content: (textContent as any)?.text || "",
         hasToolUse: response.content.some((c) => c.type === "tool_use"),
         toolUse: toolUseContent,
         chartData: processedChartData,
@@ -434,10 +385,10 @@ Focus on clear financial insights and let the visualization enhance understandin
       return new Response(
         JSON.stringify({
           error: "API Error",
-          details: error.message,
-          code: error.status,
+          details: (error as any).message,
+          code: (error as any).status,
         }),
-        { status: error.status },
+        { status: (error as any).status },
       );
     }
 
