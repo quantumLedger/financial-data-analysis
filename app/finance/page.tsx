@@ -107,8 +107,8 @@ interface FileUpload {
 }
 
 const models: Model[] = [
-  { id: "claude-3-haiku-20240307", name: "IdentifyAI's CH" },
-  { id: "claude-3-5-sonnet-20240620", name: "IdentifyAI's SH" },
+  { id: "claude-sonnet-4-5-20250929", name: "IdentifyAI's CH" },
+  { id: "claude-sonnet-4-5-20250929", name: "IdentifyAI's SH" },
 ];
 
 interface APIResponse {
