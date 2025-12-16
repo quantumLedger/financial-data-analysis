@@ -477,7 +477,7 @@ export default function AIChat() {
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!input.trim() && !currentUpload) return;
-    if (isLoading) return;
+    if (isLoading || isUploading) return;
     setIsScrollLocked(true);
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -486,6 +486,9 @@ export default function AIChat() {
       file: currentUpload || undefined,
       chartData: null,
     };
+    // Clear the current upload from the input UI as soon as the message is sent
+    // so the file preview/logo above the chat doesn't persist after sending.
+    setCurrentUpload(null);
     const thinkingMessage: Message = {
       id: crypto.randomUUID(),
       role: "assistant",
@@ -572,6 +575,7 @@ export default function AIChat() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isLoading || isUploading) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (input.trim() || currentUpload) {
@@ -910,18 +914,28 @@ export default function AIChat() {
                 value={input}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder="Type your message..."
-                disabled={isLoading}
-                className="min-h-[44px] max-h-[200px] resize-none pl-12 py-3 pr-12"
+                placeholder={
+                  isLoading || isUploading
+                    ? "Please wait while your request is processing..."
+                    : "Type your message..."
+                }
+                disabled={isLoading || isUploading}
+                className="min-h-[44px] max-h-[200px] resize-none pl-12 py-3 pr-12 rounded-lg border focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary transition"
                 rows={1}
               />
 
               <Button
                 type="submit"
-                disabled={isLoading || (!input.trim() && !currentUpload)}
+                disabled={
+                  isLoading || isUploading || (!input.trim() && !currentUpload)
+                }
                 className="absolute right-2 bottom-2 h-8 w-8 rounded-full p-0"
               >
-                <Send className="h-4 w-4" />
+                {isLoading ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
               </Button>
             </div>
 
@@ -932,6 +946,17 @@ export default function AIChat() {
               onChange={handleFileSelect}
             />
           </div>
+
+          {(isUploading || isLoading) && (
+            <div className="flex items-center gap-2 px-3 pb-3 text-xs text-muted-foreground">
+              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-muted-foreground" />
+              <span>
+                {isUploading
+                  ? "Processing your file..."
+                  : "Generating your financial analysis..."}
+              </span>
+            </div>
+          )}
         </div>
       </form>
     </div>
