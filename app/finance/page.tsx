@@ -783,8 +783,8 @@ export default function AIChat() {
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div>
-                  <CardTitle className="text-h6">Financial Assistant</CardTitle>
-                  <CardDescription className="text-subtitle1">
+                  <CardTitle className="text-[14px]">Financial Assistant</CardTitle>
+                  <CardDescription className="text-[11px]">
                     Powered by weidentify.ai
                   </CardDescription>
                 </div>
@@ -792,7 +792,7 @@ export default function AIChat() {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="h-8 text-button">
+                  <Button variant="outline" className="h-8 text-[11px]">
                     {models.find((m) => m.id === selectedModel)?.name}
                     <ChevronDown className="ml-2 h-4 w-4" />
                   </Button>
@@ -814,17 +814,17 @@ export default function AIChat() {
           <CardContent className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full animate-fade-in-up max-w-[95%] mx-auto">
-                <h2 className="text-h5 mb-6">
+                <h2 className="text-[16px] mb-6">
                   Identify AI's Financial Assistant
                 </h2>
                 <div className="w-full max-w-sm mx-auto border rounded-lg p-4 mb-6">
-                  <div className="text-body2 mb-2">
+                  <div className="text-[12px] mb-2">
                     Initialize data for{" "}
                     <span className="font-medium">{accountName}</span> at{" "}
                     <span className="font-medium">{firmName}</span>
                   </div>
                   <Button
-                    className="w-full"
+                    className="w-full text-[11px]"
                     onClick={handleInitialize}
                     disabled={
                       !icfObj ||
@@ -839,12 +839,12 @@ export default function AIChat() {
                       : "Initialize and Analyze (Proposed)"}
                   </Button>
                   {portfolioError ? (
-                    <div className="text-subtitle1 text-red-500 mt-2">
+                    <div className="text-[11px] text-red-500 mt-2">
                       {portfolioError}
                     </div>
                   ) : null}
                 </div>
-                <div className="space-y-6 text-body1">
+                <div className="space-y-6 text-[12px]">
                   <div className="flex items-center gap-3">
                     <ChartArea className="text-muted-foreground w-6 h-6" />
                     <p className="text-muted-foreground">

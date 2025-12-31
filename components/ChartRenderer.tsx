@@ -36,8 +36,8 @@ function BarChartComponent({ data }: { data: ChartData }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-h5">{data.config.title}</CardTitle>
-        <CardDescription>{data.config.description}</CardDescription>
+        <CardTitle className="text-[14px]">{data.config.title}</CardTitle>
+        <CardDescription className="text-[12px]">{data.config.description}</CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={data.chartConfig}>
@@ -66,7 +66,7 @@ function BarChartComponent({ data }: { data: ChartData }) {
           </BarChart>
         </ChartContainer>
       </CardContent>
-      <CardFooter className="flex-col items-start gap-2 text-body2">
+      <CardFooter className="flex-col items-start gap-2 text-[12px]">
         {data.config.trend && (
           <div className="flex gap-2 font-medium leading-none">
             Trending {data.config.trend.direction} by{" "}
@@ -92,8 +92,8 @@ function MultiBarChartComponent({ data }: { data: ChartData }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-h5">{data.config.title}</CardTitle>
-        <CardDescription>{data.config.description}</CardDescription>
+        <CardTitle className="text-[14px]">{data.config.title}</CardTitle>
+        <CardDescription className="text-[12px]">{data.config.description}</CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={data.chartConfig}>
@@ -125,7 +125,7 @@ function MultiBarChartComponent({ data }: { data: ChartData }) {
           </BarChart>
         </ChartContainer>
       </CardContent>
-      <CardFooter className="flex-col items-start gap-2 text-body2">
+      <CardFooter className="flex-col items-start gap-2 text-[12px]">
         {data.config.trend && (
           <div className="flex gap-2 font-medium leading-none">
             Trending {data.config.trend.direction} by{" "}
@@ -151,8 +151,8 @@ function LineChartComponent({ data }: { data: ChartData }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-h5">{data.config.title}</CardTitle>
-        <CardDescription>{data.config.description}</CardDescription>
+        <CardTitle className="text-[14px]">{data.config.title}</CardTitle>
+        <CardDescription className="text-[12px]">{data.config.description}</CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={data.chartConfig}>
@@ -193,7 +193,7 @@ function LineChartComponent({ data }: { data: ChartData }) {
           </LineChart>
         </ChartContainer>
       </CardContent>
-      <CardFooter className="flex-col items-start gap-2 text-body2">
+      <CardFooter className="flex-col items-start gap-2 text-[12px]">
         {data.config.trend && (
           <div className="flex gap-2 font-medium leading-none">
             Trending {data.config.trend.direction} by{" "}
@@ -264,14 +264,14 @@ function PieChartComponent({ data }: { data: ChartData }) {
                         <tspan
                           x={viewBox.cx}
                           y={viewBox.cy}
-                          className="fill-foreground text-3xl font-bold"
+                          className="fill-foreground text-[18px] font-bold"
                         >
                           {totalValue.toLocaleString()}
                         </tspan>
                         <tspan
                           x={viewBox.cx}
-                          y={(viewBox.cy || 0) + 24}
-                          className="fill-muted-foreground"
+                          y={(viewBox.cy || 0) + 20}
+                          className="fill-muted-foreground text-[12px]"
                         >
                           {data.config.totalLabel}
                         </tspan>
@@ -285,7 +285,7 @@ function PieChartComponent({ data }: { data: ChartData }) {
           </PieChart>
         </ChartContainer>
       </CardContent>
-      <CardFooter className="flex-col gap-2 text-sm">
+      <CardFooter className="flex-col gap-2 text-[12px]">
         {data.config.trend && (
           <div className="flex items-center gap-2 font-medium leading-none">
             Trending {data.config.trend.direction} by{" "}
@@ -317,8 +317,8 @@ function AreaChartComponent({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-h5">{data.config.title}</CardTitle>
-        <CardDescription>{data.config.description}</CardDescription>
+        <CardTitle className="text-[14px]">{data.config.title}</CardTitle>
+        <CardDescription className="text-[12px]">{data.config.description}</CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={data.chartConfig}>
@@ -363,7 +363,7 @@ function AreaChartComponent({
         </ChartContainer>
       </CardContent>
       <CardFooter>
-        <div className="flex w-full items-start gap-2 text-body2">
+        <div className="flex w-full items-start gap-2 text-[12px]">
           <div className="grid gap-2">
             {data.config.trend && (
               <div className="flex items-center gap-2 font-medium leading-none">
