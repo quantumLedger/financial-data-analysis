@@ -50,7 +50,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({
         ) : (
           <FileText className="w-4 h-4" />
         )}
-        <span className="text-xs">{truncatedName}</span>
+        <span className="text-subtitle1">{truncatedName}</span>
       </Badge>
     );
   }
@@ -71,7 +71,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({
       ) : (
         <div className="w-full h-full flex flex-col items-center justify-center bg-muted rounded-lg">
           <FileText className="w-6 h-6 mb-1" />
-          <span className="text-xs font-medium uppercase">{fileExtension}</span>
+          <span className="text-subtitle1 font-medium uppercase">{fileExtension}</span>
         </div>
       )}
       {onRemove && (

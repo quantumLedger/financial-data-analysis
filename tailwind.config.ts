@@ -51,6 +51,16 @@ const config: Config = {
   				'5': 'hsl(var(--chart-5))'
   			}
   		},
+  		fontSize: {
+  			'h4': ['28px', { lineHeight: '1.2', fontWeight: '700' }],
+  			'h5': ['24px', { lineHeight: '1.2', fontWeight: '500' }],
+  			'h6': ['20px', { lineHeight: '1.2', fontWeight: '500' }],
+  			'body1': ['16px', { lineHeight: '1.5', fontWeight: '500' }],
+  			'body2': ['14px', { lineHeight: '1.5', fontWeight: '500' }],
+  			'subtitle1': ['12px', { lineHeight: '1.5', fontWeight: '500' }],
+  			'subtitle2': ['11px', { lineHeight: '1.5', fontWeight: '500' }],
+  			'button': ['12px', { lineHeight: '1.5', fontWeight: '500' }],
+  		},
   		borderRadius: {
   			lg: 'var(--radius)',
   			md: 'calc(var(--radius) - 2px)',

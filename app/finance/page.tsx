@@ -44,35 +44,44 @@ import remarkGfm from "remark-gfm";
 type ChartMsg = ChartData;
 
 const mdComponents: Components = {
-  h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mt-3" {...props} />,
-  h3: ({ node, ...props }) => <h3 className="text-base font-semibold mt-2" {...props} />,
-  ul: ({ node, ...props }) => <ul className="list-disc pl-5 my-2" {...props} />,
-  ol: ({ node, ...props }) => <ol className="list-decimal pl-5 my-2" {...props} />,
+  // Headings: 16px
+  h1: ({ node, ...props }) => <h1 className="text-[16px] font-semibold mt-3 mb-2" {...props} />,
+  h2: ({ node, ...props }) => <h2 className="text-[16px] font-semibold mt-3 mb-2" {...props} />,
+  // Subheadings: 14px
+  h3: ({ node, ...props }) => <h3 className="text-[14px] font-medium mt-2 mb-1" {...props} />,
+  h4: ({ node, ...props }) => <h4 className="text-[14px] font-medium mt-2 mb-1" {...props} />,
+  h5: ({ node, ...props }) => <h5 className="text-[14px] font-medium mt-2 mb-1" {...props} />,
+  h6: ({ node, ...props }) => <h6 className="text-[14px] font-medium mt-2 mb-1" {...props} />,
+  // Content: 12px
+  p: ({ node, ...props }) => <p className="text-[12px] my-1" {...props} />,
+  ul: ({ node, ...props }) => <ul className="list-disc pl-5 my-2 text-[12px]" {...props} />,
+  ol: ({ node, ...props }) => <ol className="list-decimal pl-5 my-2 text-[12px]" {...props} />,
+  li: ({ node, ...props }) => <li className="text-[12px]" {...props} />,
   table: ({ node, ...props }) => (
     <div className="overflow-x-auto my-3">
-      <table className="w-full border-collapse" {...props} />
+      <table className="w-full border-collapse text-[12px]" {...props} />
     </div>
   ),
   th: ({ node, ...props }) => (
-    <th className="border px-2 py-1 text-left bg-background/50" {...props} />
+    <th className="border px-2 py-1 text-left bg-background/50 text-[12px] font-medium" {...props} />
   ),
   td: ({ node, ...props }) => (
-    <td className="border px-2 py-1 align-top" {...props} />
+    <td className="border px-2 py-1 align-top text-[12px]" {...props} />
   ),
   blockquote: ({ node, ...props }) => (
-    <blockquote className="border-l-4 pl-3 italic text-sm opacity-90 my-2" {...props} />
+    <blockquote className="border-l-4 pl-3 italic text-[12px] opacity-90 my-2" {...props} />
   ),
   // @ts-ignore — react-markdown passes `inline`; TS inference complains
   code({ node, inline, className, children, ...props }) {
     if (inline) {
       return (
-        <code className="bg-background/50 px-1 py-0.5 rounded" {...props}>
+        <code className="bg-background/50 px-1 py-0.5 rounded text-[12px]" {...props}>
           {children}
         </code>
       );
     }
     return (
-  <pre {...(props as React.HTMLAttributes<HTMLPreElement>)} className="bg-background/50 p-3 rounded overflow-auto my-2">
+  <pre {...(props as React.HTMLAttributes<HTMLPreElement>)} className="bg-background/50 p-3 rounded overflow-auto my-2 text-[12px]">
         <code className={className}>{children}</code>
       </pre>
     );
@@ -186,7 +195,7 @@ const MessageComponent: React.FC<MessageComponentProps> = ({ message }) => {
         }`}
       >
         <div
-          className={`p-3 rounded-md text-base ${
+          className={`p-3 rounded-md text-[12px] ${
             message.role === "user"
               ? "bg-primary text-primary-foreground"
               : "bg-muted border"
@@ -318,10 +327,21 @@ export default function AIChat() {
   const [currentChartIndex, setCurrentChartIndex] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
   const [isScrollLocked, setIsScrollLocked] = useState(false);
+  const resizableContainerRef = useRef<HTMLDivElement>(null);
 
   const [portfolioJson, setPortfolioJson] = useState<any | null>(null);
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
+  
+  // Resizable panel state
+  const [leftPanelWidth, setLeftPanelWidth] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('leftPanelWidth');
+      return saved ? parseFloat(saved) : 33.33; // Default to 33.33% (1/3)
+    }
+    return 33.33;
+  });
+  const [isResizing, setIsResizing] = useState(false);
 
   useEffect(() => {
     async function loadOnce() {
@@ -402,6 +422,50 @@ export default function AIChat() {
       setTimeout(scrollToNewestChart, 100);
     }
   }, [messages]);
+
+  // Save panel width to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('leftPanelWidth', leftPanelWidth.toString());
+    }
+  }, [leftPanelWidth]);
+
+  // Handle resizing
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      e.preventDefault();
+      if (!resizableContainerRef.current) return;
+      
+      const containerRect = resizableContainerRef.current.getBoundingClientRect();
+      const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100;
+      
+      // Constrain between 20% and 70%
+      const constrainedWidth = Math.max(20, Math.min(70, newWidth));
+      setLeftPanelWidth(constrainedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    // Prevent text selection during drag
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    document.addEventListener('mousemove', handleMouseMove, { passive: false });
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing]);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -707,14 +771,20 @@ export default function AIChat() {
         }}
       />
 
-      <div className="flex-1 flex bg-background p-4 pt-0 gap-4 h-[calc(100vh-4rem)] pb-40">
-        <Card className="w-1/3 flex flex-col h-full">
+      <div 
+        ref={resizableContainerRef}
+        className="flex-1 flex bg-background p-4 pt-0 h-[calc(100vh-4rem)] pb-40 resizable-container relative"
+      >
+        <Card 
+          className="flex flex-col h-full transition-all mr-2"
+          style={{ width: `calc(${leftPanelWidth}% - 0.5rem)` }}
+        >
           <CardHeader className="py-3 px-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div>
-                  <CardTitle className="text-lg">Financial Assistant</CardTitle>
-                  <CardDescription className="text-xs">
+                  <CardTitle className="text-h6">Financial Assistant</CardTitle>
+                  <CardDescription className="text-subtitle1">
                     Powered by weidentify.ai
                   </CardDescription>
                 </div>
@@ -722,7 +792,7 @@ export default function AIChat() {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="h-8 text-sm">
+                  <Button variant="outline" className="h-8 text-button">
                     {models.find((m) => m.id === selectedModel)?.name}
                     <ChevronDown className="ml-2 h-4 w-4" />
                   </Button>
@@ -744,14 +814,14 @@ export default function AIChat() {
           <CardContent className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full animate-fade-in-up max-w-[95%] mx-auto">
-                <h2 className="text-xl font-semibold mb-6">
+                <h2 className="text-h5 mb-6">
                   Identify AI's Financial Assistant
                 </h2>
                 <div className="w-full max-w-sm mx-auto border rounded-lg p-4 mb-6">
-                  <div className="text-sm mb-2">
+                  <div className="text-body2 mb-2">
                     Initialize data for{" "}
-                    <span className="font-semibold">{accountName}</span> at{" "}
-                    <span className="font-semibold">{firmName}</span>
+                    <span className="font-medium">{accountName}</span> at{" "}
+                    <span className="font-medium">{firmName}</span>
                   </div>
                   <Button
                     className="w-full"
@@ -769,12 +839,12 @@ export default function AIChat() {
                       : "Initialize and Analyze (Proposed)"}
                   </Button>
                   {portfolioError ? (
-                    <div className="text-xs text-red-500 mt-2">
+                    <div className="text-subtitle1 text-red-500 mt-2">
                       {portfolioError}
                     </div>
                   ) : null}
                 </div>
-                <div className="space-y-6 text-base">
+                <div className="space-y-6 text-body1">
                   <div className="flex items-center gap-3">
                     <ChartArea className="text-muted-foreground w-6 h-6" />
                     <p className="text-muted-foreground">
@@ -816,10 +886,30 @@ export default function AIChat() {
           </CardContent>
         </Card>
 
-        <Card className="flex-1 flex flex-col h-full overflow-hidden">
+        {/* Resizable divider */}
+        <div
+          className={`w-1 bg-border hover:bg-primary/50 cursor-col-resize transition-colors relative group flex-shrink-0 select-none ${
+            isResizing ? 'bg-primary' : ''
+          }`}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsResizing(true);
+          }}
+          style={{ userSelect: 'none' }}
+        >
+          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-8 -ml-4 flex items-center justify-center pointer-events-none">
+            <div className="w-1 h-12 bg-muted-foreground/30 rounded-full group-hover:bg-primary/50 transition-colors" />
+          </div>
+        </div>
+
+        <Card 
+          className="flex flex-col h-full overflow-hidden transition-all ml-2"
+          style={{ width: `calc(${100 - leftPanelWidth}% - 0.5rem)` }}
+        >
           {hasCharts && (
             <CardHeader className="py-3 px-4 shrink-0">
-              <CardTitle className="text-lg">Analysis & Visualizations</CardTitle>
+              <CardTitle className="text-h6">Analysis & Visualizations</CardTitle>
             </CardHeader>
           )}
 
@@ -853,10 +943,10 @@ export default function AIChat() {
                 <div className="flex flex-col items-center justify-center gap-4 -translate-y-8">
                   <ChartColumnBig className="w-8 h-8 text-muted-foreground" />
                   <div className="space-y-2">
-                    <CardTitle className="text-lg">
+                    <CardTitle className="text-h6">
                       Analysis & Visualizations
                     </CardTitle>
-                    <CardDescription className="text-base">
+                    <CardDescription className="text-body1">
                       Charts and detailed analysis will appear here as you chat
                     </CardDescription>
                     <div className="flex flex-wrap justify-center gap-2 mt-4">
@@ -948,7 +1038,7 @@ export default function AIChat() {
           </div>
 
           {(isUploading || isLoading) && (
-            <div className="flex items-center gap-2 px-3 pb-3 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 px-3 pb-3 text-subtitle1 text-muted-foreground">
               <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-muted-foreground" />
               <span>
                 {isUploading
