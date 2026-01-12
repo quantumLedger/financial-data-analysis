@@ -128,7 +128,10 @@ const tools: ToolSchema[] = [
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, fileData, model, includeLiveData } = await req.json();
+    const { messages, fileData, model, includeLiveData, icfMapping } = await req.json();
+    
+    // Extract icfMapping for use in live data fetching
+    const icfData = icfMapping || null;
 
     console.log("🔍 Initial Request Data:", {
       hasMessages: !!messages,
@@ -225,15 +228,15 @@ export async function POST(req: NextRequest) {
     
     if (includeLiveData) {
       // STEP 1a: Fetch stock/portfolio data using firmName and accountName
-      if (icfMapping && icfMapping.firm_name && icfMapping.client_id && icfMapping.investment_banker_id) {
+      if (icfData && icfData.firm_name && icfData.client_id && icfData.investment_banker_id) {
         try {
           console.log("📊 STEP 1a: Fetching stock/portfolio data from API...");
-          console.log("Firm:", icfMapping.firm_name, "Account:", icfMapping.firm_account_name);
+          console.log("Firm:", icfData.firm_name, "Account:", icfData.firm_account_name);
           
           stockData = await fetchCombinedCSVsByFirm(
-            String(icfMapping.client_id),
-            String(icfMapping.investment_banker_id),
-            icfMapping.firm_name,
+            String(icfData.client_id),
+            String(icfData.investment_banker_id),
+            icfData.firm_name,
             "MASTER_PROPOSED"
           );
           
@@ -325,7 +328,7 @@ export async function POST(req: NextRequest) {
           : String(stockData).substring(0, 3000);
         
         enhancedPrompt += `---
-**STOCK/PORTFOLIO DATA (Current Holdings & Performance for ${icfMapping?.firm_account_name || 'Account'} at ${icfMapping?.firm_name || 'Firm'}):**
+**STOCK/PORTFOLIO DATA (Current Holdings & Performance for ${icfData?.firm_account_name || 'Account'} at ${icfData?.firm_name || 'Firm'}):**
 ${stockDataSummary}
 ---
 \n`;
