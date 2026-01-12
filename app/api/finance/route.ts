@@ -3,6 +3,39 @@ import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ChartData } from "@/types/chart";
 
+// Portfolio data fetching function
+async function fetchCombinedCSVsByFirm(
+  clientId: string,
+  investmentBankerId: string,
+  firmName: string,
+  portfolioType: "MASTER_ORIGINAL" | "MASTER_PROPOSED"
+) {
+  const API_URL = "https://apis.weidentify.ai";
+  
+  // Create FormData for multipart/form-data request
+  const formData = new FormData();
+  formData.append("investment_banker_id", investmentBankerId);
+  formData.append("portfolio_type", portfolioType);
+  formData.append("firm_name", firmName);
+  formData.append("client_id", clientId);
+  
+  const response = await fetch(
+    `${API_URL}/api/fetch-combined-csvs-by-firm`,
+    {
+      method: "POST",
+      body: formData,
+      // Don't set Content-Type header - browser/Node will set it with boundary
+    }
+  );
+  
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "Unknown error");
+    throw new Error(`Failed to fetch portfolio data: ${response.status} - ${errorText}`);
+  }
+  
+  return await response.json();
+}
+
 // Initialize Anthropic client with correct headers
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -95,7 +128,7 @@ const tools: ToolSchema[] = [
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, fileData, model } = await req.json();
+    const { messages, fileData, model, includeLiveData } = await req.json();
 
     console.log("🔍 Initial Request Data:", {
       hasMessages: !!messages,
@@ -183,6 +216,168 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         );
       }
+    }
+
+    // STEP 1: If includeLiveData is true, fetch stock data and Perplexity data
+    let stockData = null;
+    let perplexityData = null;
+    let extractedUserQuery = '';
+    
+    if (includeLiveData) {
+      // STEP 1a: Fetch stock/portfolio data using firmName and accountName
+      if (icfMapping && icfMapping.firm_name && icfMapping.client_id && icfMapping.investment_banker_id) {
+        try {
+          console.log("📊 STEP 1a: Fetching stock/portfolio data from API...");
+          console.log("Firm:", icfMapping.firm_name, "Account:", icfMapping.firm_account_name);
+          
+          stockData = await fetchCombinedCSVsByFirm(
+            String(icfMapping.client_id),
+            String(icfMapping.investment_banker_id),
+            icfMapping.firm_name,
+            "MASTER_PROPOSED"
+          );
+          
+          console.log("✅ STEP 1a: Stock data fetched successfully");
+          console.log("   Data keys:", Object.keys(stockData || {}));
+        } catch (error) {
+          console.error("❌ STEP 1a: Error fetching stock data:", error);
+          // Continue without stock data if fetch fails
+        }
+      } else {
+        console.warn("⚠️ STEP 1a: Missing icfMapping data (firm_name, client_id, or investment_banker_id)");
+      }
+    }
+    
+    // STEP 1b: Fetch Perplexity live data if includeLiveData is true and we have a query
+    if (includeLiveData && messages.length > 0) {
+      const lastUserMessage = messages[messages.length - 1];
+      
+      // Extract user query from the last message
+      if (typeof lastUserMessage.content === 'string') {
+        extractedUserQuery = lastUserMessage.content;
+      } else if (Array.isArray(lastUserMessage.content)) {
+        // Extract text from content array
+        const textContent = lastUserMessage.content
+          .filter((c: any) => c.type === 'text')
+          .map((c: any) => c.text)
+          .join(' ');
+        extractedUserQuery = textContent;
+      }
+
+      if (extractedUserQuery.trim()) {
+        try {
+          console.log("🔍 STEP 1b: Fetching latest data from Perplexity API...");
+          console.log("Query:", extractedUserQuery.substring(0, 100) + "...");
+          
+          // Construct base URL from request
+          const protocol = req.headers.get('x-forwarded-proto') || 'http';
+          const host = req.headers.get('host') || 'localhost:3000';
+          const baseUrl = `${protocol}://${host}`;
+          
+          // Call Perplexity API
+          const perplexityResponse = await fetch(
+            `${baseUrl}/api/perplexity`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query: extractedUserQuery }),
+            }
+          );
+
+          if (perplexityResponse.ok) {
+            const responseData = await perplexityResponse.json();
+            
+            if (responseData.success && responseData.content) {
+              perplexityData = {
+                content: responseData.content,
+                citations: responseData.citations || [],
+                citationCount: responseData.citations?.length || 0
+              };
+              console.log("✅ STEP 1b: Perplexity search completed successfully");
+              console.log(`   Found ${perplexityData.citationCount} citations`);
+            } else {
+              console.warn("⚠️ STEP 1b: Perplexity search returned no content:", responseData.error);
+            }
+          } else {
+            const errorText = await perplexityResponse.text();
+            console.warn("⚠️ STEP 1b: Perplexity API call failed:", perplexityResponse.status, errorText);
+          }
+        } catch (error) {
+          console.error("❌ STEP 1b: Error calling Perplexity API:", error);
+          // Continue without live data if search fails
+        }
+      }
+    }
+
+    // STEP 2: Rebuild prompt with Stock Data + Perplexity response and send to Anthropic
+    if (includeLiveData && extractedUserQuery && (stockData || perplexityData)) {
+      console.log("🔧 STEP 2: Rebuilding prompt with Stock Data and Perplexity data...");
+      console.log("   Has Stock Data:", !!stockData);
+      console.log("   Has Perplexity Data:", !!perplexityData);
+      
+      // Build enhanced prompt that includes original query, stock data, and live data
+      let enhancedPrompt = `Original Query: ${extractedUserQuery}\n\n`;
+      
+      // Add stock/portfolio data if available
+      if (stockData) {
+        const stockDataSummary = typeof stockData === 'object' 
+          ? JSON.stringify(stockData, null, 2).substring(0, 3000) // Limit to 3000 chars for better data
+          : String(stockData).substring(0, 3000);
+        
+        enhancedPrompt += `---
+**STOCK/PORTFOLIO DATA (Current Holdings & Performance for ${icfMapping?.firm_account_name || 'Account'} at ${icfMapping?.firm_name || 'Firm'}):**
+${stockDataSummary}
+---
+\n`;
+      }
+      
+      // Add Perplexity live data if available
+      if (perplexityData && perplexityData.content) {
+        enhancedPrompt += `---
+**LIVE DATA FROM WEB SEARCH (Latest Market Information):**
+${perplexityData.content}
+
+**Sources:** ${perplexityData.citationCount} citation(s) found
+---
+\n`;
+      }
+      
+      // Build instruction section
+      const instructions = [];
+      if (stockData) {
+        instructions.push('- The current stock/portfolio data provided above');
+      }
+      if (perplexityData) {
+        instructions.push('- The latest live market data from web search');
+      }
+      if (stockData && perplexityData) {
+        instructions.push('- Combine both sources for comprehensive analysis');
+      }
+      
+      enhancedPrompt += `Please analyze the above query using:\n${instructions.join('\n')}\n\nIncorporate all available information into your analysis and visualizations.`;
+
+      // Update the last message with the enhanced prompt
+      const lastMessageIndex = anthropicMessages.length - 1;
+      
+      if (typeof anthropicMessages[lastMessageIndex].content === 'string') {
+        // Simple string content - replace with enhanced prompt
+        anthropicMessages[lastMessageIndex].content = enhancedPrompt;
+      } else if (Array.isArray(anthropicMessages[lastMessageIndex].content)) {
+        // Array content (with file data) - update the text elements
+        const contentArray = anthropicMessages[lastMessageIndex].content as any[];
+        
+        // Find or create text element
+        let textElement = contentArray.find((c: any) => c.type === 'text');
+        if (textElement) {
+          // Update existing text element with enhanced prompt
+          textElement.text = enhancedPrompt;
+        } else {
+          // Add new text element at the beginning
+          contentArray.unshift({ type: 'text', text: enhancedPrompt });
+        }
+      }
+      
+      console.log("✅ STEP 2: Enhanced prompt created and ready for Anthropic");
     }
 
     console.log("🚀 Final Claude API Request:", {

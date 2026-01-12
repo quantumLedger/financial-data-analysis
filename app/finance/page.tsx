@@ -31,6 +31,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Switch } from "@/components/ui/switch";
 import type { ChartData } from "@/types/chart";
 import TopNavBar from "@/components/TopNavBar";
 import {
@@ -328,6 +329,7 @@ export default function AIChat() {
   const contentRef = useRef<HTMLDivElement>(null);
   const [isScrollLocked, setIsScrollLocked] = useState(false);
   const resizableContainerRef = useRef<HTMLDivElement>(null);
+  const [includeLiveData, setIncludeLiveData] = useState(false);
 
   const [portfolioJson, setPortfolioJson] = useState<any | null>(null);
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
@@ -593,6 +595,7 @@ export default function AIChat() {
       messages: apiMessages,
       model: selectedModel,
       icfMapping: icfObj,
+      includeLiveData: includeLiveData,
     };
     try {
       const response = await fetch("/api/finance", {
@@ -978,6 +981,19 @@ export default function AIChat() {
                    z-50"
       >
         <div className="flex flex-col gap-2">
+          {/* Live Data Toggle */}
+          <div className="flex items-center justify-end gap-2 px-3 pt-3">
+            <label htmlFor="live-data-toggle" className="text-[11px] text-muted-foreground cursor-pointer">
+              Include Live Data
+            </label>
+            <Switch
+              id="live-data-toggle"
+              checked={includeLiveData}
+              onCheckedChange={setIncludeLiveData}
+              disabled={isLoading || isUploading}
+            />
+          </div>
+
           {currentUpload && (
             <div className="w-full">
               <FilePreview
