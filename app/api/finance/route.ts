@@ -542,15 +542,20 @@ Focus on clear financial insights and let the visualization enhance understandin
       });
     }, 3, 2000, 15000, [429, 500, 502, 503, 504]);
 
+    // Calculate total text length from all text blocks
+    const allTextBlocks = response.content.filter((c) => c.type === "text");
+    const totalTextLength = allTextBlocks.reduce(
+      (sum: number, c: any) => sum + (c.text?.length || 0),
+      0
+    );
+
     console.log("✅ Claude API Response received:", {
       status: "success",
       stopReason: response.stop_reason,
       hasToolUse: response.content.some((c) => c.type === "tool_use"),
       contentTypes: response.content.map((c) => c.type),
-      contentLength:
-        response.content[0].type === "text"
-          ? (response.content[0] as any).text.length
-          : 0,
+      textBlockCount: allTextBlocks.length,
+      totalTextLength: totalTextLength,
       toolOutput: response.content.find((c) => c.type === "tool_use")
         ? JSON.stringify(
             response.content.find((c) => c.type === "tool_use"),
@@ -561,7 +566,12 @@ Focus on clear financial insights and let the visualization enhance understandin
     });
 
     const toolUseContent = response.content.find((c) => c.type === "tool_use");
-    const textContent = response.content.find((c) => c.type === "text");
+    // Collect ALL text content blocks (not just the first one)
+    const textContents = response.content.filter((c) => c.type === "text");
+    // Concatenate all text blocks to get the complete response
+    const fullTextContent = textContents
+      .map((c: any) => c.text || "")
+      .join("\n\n");
 
     const processToolResponse = (toolUseContent: any) => {
       if (!toolUseContent) return null;
@@ -653,7 +663,7 @@ Focus on clear financial insights and let the visualization enhance understandin
 
     return new Response(
       JSON.stringify({
-        content: (textContent as any)?.text || "",
+        content: fullTextContent || "",
         hasToolUse: response.content.some((c) => c.type === "tool_use"),
         toolUse: toolUseContent,
         chartData: processedChartData,
