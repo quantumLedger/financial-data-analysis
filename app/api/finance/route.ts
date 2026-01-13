@@ -570,8 +570,9 @@ Focus on clear financial insights and let the visualization enhance understandin
 
       // Parse data if it's a string (Claude sometimes returns JSON strings, possibly double-encoded)
       if (chartData.data && typeof chartData.data === 'string') {
+        const originalDataString: string = chartData.data as string; // Store original string for error logging
         try {
-          let parsed = JSON.parse(chartData.data);
+          let parsed = JSON.parse(originalDataString);
           // If the parsed result is still a string, parse it again (double-encoded JSON)
           if (typeof parsed === 'string') {
             parsed = JSON.parse(parsed);
@@ -580,7 +581,7 @@ Focus on clear financial insights and let the visualization enhance understandin
           console.log("✅ Parsed string data to array");
         } catch (parseError) {
           console.error("❌ Error parsing data string:", parseError);
-          console.error("Data sample:", chartData.data.substring(0, 200));
+          console.error("Data sample:", originalDataString.substring(0, 200));
           throw new Error("Invalid chart data structure: data is not valid JSON");
         }
       }
