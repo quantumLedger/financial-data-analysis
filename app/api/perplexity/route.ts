@@ -59,47 +59,98 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Call Perplexity API
+    // Retry utility function with exponential backoff
+    const retryWithBackoff = async <T>(
+      fn: () => Promise<T>,
+      maxRetries: number = 3,
+      initialDelay: number = 1000,
+      maxDelay: number = 10000
+    ): Promise<T> => {
+      let lastError: Error | null = null;
+      
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          return await fn();
+        } catch (error: any) {
+          lastError = error;
+          const statusCode = error?.status;
+          
+          // Don't retry on client errors (4xx) except 429 (rate limit)
+          if (statusCode && statusCode >= 400 && statusCode < 500 && statusCode !== 429) {
+            throw error;
+          }
+          
+          // Don't retry on last attempt
+          if (attempt === maxRetries - 1) {
+            throw error;
+          }
+          
+          // Calculate delay with exponential backoff and jitter
+          const delay = Math.min(
+            initialDelay * Math.pow(2, attempt) + Math.random() * 1000,
+            maxDelay
+          );
+          
+          console.log(`⚠️ Perplexity API retry attempt ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+      
+      throw lastError || new Error("Max retries exceeded");
+    };
+
+    // Call Perplexity API with retry
     console.log("Calling Perplexity API with query:", query.substring(0, 50) + "...");
     
     let response;
     try {
-      response = await fetch("https://api.perplexity.ai/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: "sonar-pro",
-          messages: [
-            {
-              role: "user",
-              content: query,
-            },
-          ],
-          max_tokens: 1024,
-          temperature: 0.0,
-        }),
-      });
-    } catch (fetchError) {
-      console.error("Fetch error calling Perplexity API:", fetchError);
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: `Network error: ${fetchError instanceof Error ? fetchError.message : "Unknown fetch error"}`,
-          content: "",
-          citations: [],
-        }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Perplexity API error:", errorText);
+      response = await retryWithBackoff(async () => {
+        const res = await fetch("https://api.perplexity.ai/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: "sonar-pro",
+            messages: [
+              {
+                role: "user",
+                content: query,
+              },
+            ],
+            max_tokens: 1024,
+            temperature: 0.0,
+          }),
+        });
+        
+        // Throw error for retryable status codes
+        if (!res.ok) {
+          const errorText = await res.text().catch(() => "Unknown error");
+          const error: any = new Error(`Perplexity API error: ${res.status} - ${errorText}`);
+          error.status = res.status;
+          
+          // Don't retry on 401 (auth error)
+          if (res.status === 401) {
+            throw error;
+          }
+          
+          // Retry on 429 (rate limit) and 5xx (server errors)
+          if (res.status === 429 || res.status >= 500) {
+            throw error;
+          }
+          
+          // For other 4xx errors, throw without retry
+          throw error;
+        }
+        
+        return res;
+      }, 3, 1000, 10000);
+    } catch (fetchError: any) {
+      console.error("Fetch error calling Perplexity API after retries:", fetchError);
       
-      if (response.status === 429) {
+      // Handle specific error cases
+      if (fetchError?.status === 429) {
         return new Response(
           JSON.stringify({
             success: false,
@@ -111,7 +162,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      if (response.status === 401) {
+      if (fetchError?.status === 401) {
         return new Response(
           JSON.stringify({
             success: false,
@@ -126,11 +177,11 @@ export async function POST(req: NextRequest) {
       return new Response(
         JSON.stringify({
           success: false,
-          error: `API error: ${response.status} ${response.statusText}`,
+          error: `API error: ${fetchError?.status || 500} ${fetchError?.message || "Unknown error"}`,
           content: "",
           citations: [],
         }),
-        { status: response.status, headers: { "Content-Type": "application/json" } }
+        { status: fetchError?.status || 500, headers: { "Content-Type": "application/json" } }
       );
     }
 

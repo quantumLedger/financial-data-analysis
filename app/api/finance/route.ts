@@ -3,7 +3,53 @@ import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ChartData } from "@/types/chart";
 
-// Portfolio data fetching function
+// Retry utility function with exponential backoff
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  initialDelay: number = 1000,
+  maxDelay: number = 10000,
+  retryableErrors?: number[]
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      const statusCode = error?.status || error?.response?.status || error?.statusCode;
+      
+      // Don't retry on client errors (4xx) except 429 (rate limit)
+      if (statusCode && statusCode >= 400 && statusCode < 500 && statusCode !== 429) {
+        throw error;
+      }
+      
+      // Check if error is retryable
+      if (retryableErrors && statusCode && !retryableErrors.includes(statusCode)) {
+        throw error;
+      }
+      
+      // Don't retry on last attempt
+      if (attempt === maxRetries - 1) {
+        throw error;
+      }
+      
+      // Calculate delay with exponential backoff and jitter
+      const delay = Math.min(
+        initialDelay * Math.pow(2, attempt) + Math.random() * 1000,
+        maxDelay
+      );
+      
+      console.log(`⚠️ Retry attempt ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError || new Error("Max retries exceeded");
+}
+
+// Portfolio data fetching function with retry
 async function fetchCombinedCSVsByFirm(
   clientId: string,
   investmentBankerId: string,
@@ -12,28 +58,32 @@ async function fetchCombinedCSVsByFirm(
 ) {
   const API_URL = "https://apis.weidentify.ai";
   
-  // Create FormData for multipart/form-data request
-  const formData = new FormData();
-  formData.append("investment_banker_id", investmentBankerId);
-  formData.append("portfolio_type", portfolioType);
-  formData.append("firm_name", firmName);
-  formData.append("client_id", clientId);
-  
-  const response = await fetch(
-    `${API_URL}/api/fetch-combined-csvs-by-firm`,
-    {
-      method: "POST",
-      body: formData,
-      // Don't set Content-Type header - browser/Node will set it with boundary
+  return retryWithBackoff(async () => {
+    // Create FormData for multipart/form-data request
+    const formData = new FormData();
+    formData.append("investment_banker_id", investmentBankerId);
+    formData.append("portfolio_type", portfolioType);
+    formData.append("firm_name", firmName);
+    formData.append("client_id", clientId);
+    
+    const response = await fetch(
+      `${API_URL}/api/fetch-combined-csvs-by-firm`,
+      {
+        method: "POST",
+        body: formData,
+        // Don't set Content-Type header - browser/Node will set it with boundary
+      }
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unknown error");
+      const error: any = new Error(`Failed to fetch portfolio data: ${response.status} - ${errorText}`);
+      error.status = response.status;
+      throw error;
     }
-  );
-  
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "Unknown error");
-    throw new Error(`Failed to fetch portfolio data: ${response.status} - ${errorText}`);
-  }
-  
-  return await response.json();
+    
+    return await response.json();
+  }, 3, 1000, 10000, [429, 500, 502, 503, 504]);
 }
 
 // Initialize Anthropic client with correct headers
@@ -277,33 +327,44 @@ export async function POST(req: NextRequest) {
           const host = req.headers.get('host') || 'localhost:3000';
           const baseUrl = `${protocol}://${host}`;
           
-          // Call Perplexity API
-          const perplexityResponse = await fetch(
-            `${baseUrl}/api/perplexity`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ query: extractedUserQuery }),
-            }
-          );
+          // Call Perplexity API with retry (the Perplexity route has its own retry logic, but we add one more layer)
+          const responseData = await retryWithBackoff(async () => {
+            const perplexityResponse = await fetch(
+              `${baseUrl}/api/perplexity`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: extractedUserQuery }),
+              }
+            );
 
-          if (perplexityResponse.ok) {
-            const responseData = await perplexityResponse.json();
-            
-            if (responseData.success && responseData.content) {
-              perplexityData = {
-                content: responseData.content,
-                citations: responseData.citations || [],
-                citationCount: responseData.citations?.length || 0
-              };
-              console.log("✅ STEP 1b: Perplexity search completed successfully");
-              console.log(`   Found ${perplexityData.citationCount} citations`);
-            } else {
-              console.warn("⚠️ STEP 1b: Perplexity search returned no content:", responseData.error);
+            if (!perplexityResponse.ok) {
+              const errorText = await perplexityResponse.text().catch(() => "Unknown error");
+              const error: any = new Error(`Perplexity API call failed: ${perplexityResponse.status} - ${errorText}`);
+              error.status = perplexityResponse.status;
+              
+              // Retry on 429 and 5xx errors
+              if (perplexityResponse.status === 429 || perplexityResponse.status >= 500) {
+                throw error;
+              }
+              
+              // Don't retry on other errors
+              throw error;
             }
+
+            return await perplexityResponse.json();
+          }, 2, 2000, 8000, [429, 500, 502, 503, 504]);
+          
+          if (responseData.success && responseData.content) {
+            perplexityData = {
+              content: responseData.content,
+              citations: responseData.citations || [],
+              citationCount: responseData.citations?.length || 0
+            };
+            console.log("✅ STEP 1b: Perplexity search completed successfully");
+            console.log(`   Found ${perplexityData.citationCount} citations`);
           } else {
-            const errorText = await perplexityResponse.text();
-            console.warn("⚠️ STEP 1b: Perplexity API call failed:", perplexityResponse.status, errorText);
+            console.warn("⚠️ STEP 1b: Perplexity search returned no content:", responseData.error);
           }
         } catch (error) {
           console.error("❌ STEP 1b: Error calling Perplexity API:", error);
@@ -468,15 +529,18 @@ Always:
 
 Focus on clear financial insights and let the visualization enhance understanding.`;
 
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: 4096,
-      temperature: 0.7,
-      tools: tools,
-      tool_choice: { type: "auto" },
-      messages: anthropicMessages,
-      system: systemPrompt,
-    });
+    // Call Claude API with retry logic
+    const response = await retryWithBackoff(async () => {
+      return await anthropic.messages.create({
+        model,
+        max_tokens: 4096,
+        temperature: 0.7,
+        tools: tools,
+        tool_choice: { type: "auto" },
+        messages: anthropicMessages,
+        system: systemPrompt,
+      });
+    }, 3, 2000, 15000, [429, 500, 502, 503, 504]);
 
     console.log("✅ Claude API Response received:", {
       status: "success",
@@ -504,11 +568,31 @@ Focus on clear financial insights and let the visualization enhance understandin
 
       const chartData = toolUseContent.input as ChartToolResponse;
 
+      // Parse data if it's a string (Claude sometimes returns JSON strings)
+      if (chartData.data && typeof chartData.data === 'string') {
+        try {
+          chartData.data = JSON.parse(chartData.data);
+          console.log("✅ Parsed string data to array");
+        } catch (parseError) {
+          console.error("❌ Error parsing data string:", parseError);
+          throw new Error("Invalid chart data structure: data is not valid JSON");
+        }
+      }
+
       if (
         !chartData.chartType ||
         !chartData.data ||
         !Array.isArray(chartData.data)
       ) {
+        console.error("Invalid chart data structure:", {
+          hasChartType: !!chartData.chartType,
+          hasData: !!chartData.data,
+          dataType: typeof chartData.data,
+          isArray: Array.isArray(chartData.data),
+          dataSample: typeof chartData.data === 'string' 
+            ? chartData.data.substring(0, 100) 
+            : JSON.stringify(chartData.data).substring(0, 100)
+        });
         throw new Error("Invalid chart data structure");
       }
 
