@@ -568,13 +568,19 @@ Focus on clear financial insights and let the visualization enhance understandin
 
       const chartData = toolUseContent.input as ChartToolResponse;
 
-      // Parse data if it's a string (Claude sometimes returns JSON strings)
+      // Parse data if it's a string (Claude sometimes returns JSON strings, possibly double-encoded)
       if (chartData.data && typeof chartData.data === 'string') {
         try {
-          chartData.data = JSON.parse(chartData.data);
+          let parsed = JSON.parse(chartData.data);
+          // If the parsed result is still a string, parse it again (double-encoded JSON)
+          if (typeof parsed === 'string') {
+            parsed = JSON.parse(parsed);
+          }
+          chartData.data = parsed;
           console.log("✅ Parsed string data to array");
         } catch (parseError) {
           console.error("❌ Error parsing data string:", parseError);
+          console.error("Data sample:", chartData.data.substring(0, 200));
           throw new Error("Invalid chart data structure: data is not valid JSON");
         }
       }
