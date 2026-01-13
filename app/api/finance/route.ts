@@ -584,14 +584,20 @@ Focus on clear financial insights and let the visualization enhance understandin
         !chartData.data ||
         !Array.isArray(chartData.data)
       ) {
+        // Store data for logging before type narrowing
+        const dataForLogging = chartData.data;
+        const dataSample = typeof dataForLogging === 'string' 
+          ? dataForLogging.substring(0, 100) 
+          : dataForLogging 
+            ? JSON.stringify(dataForLogging).substring(0, 100)
+            : 'null or undefined';
+        
         console.error("Invalid chart data structure:", {
           hasChartType: !!chartData.chartType,
           hasData: !!chartData.data,
           dataType: typeof chartData.data,
           isArray: Array.isArray(chartData.data),
-          dataSample: typeof chartData.data === 'string' 
-            ? chartData.data.substring(0, 100) 
-            : JSON.stringify(chartData.data).substring(0, 100)
+          dataSample
         });
         throw new Error("Invalid chart data structure");
       }
