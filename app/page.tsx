@@ -28,7 +28,7 @@ export default function Home() {
   return (
     <IcfProvider>
       <div>
-        <FloatingSpreadsheetLauncher
+        {/* <FloatingSpreadsheetLauncher
           initialData={[
             { Ticker: "AAPL", Price: 227.3, Qty: 10 },
             { Ticker: "MSFT", Price: 415.9, Qty: 5 },
@@ -40,7 +40,7 @@ export default function Home() {
           dialogHeight={560}
           theme="light"
           sheetName="Portfolio Analyst"
-        />
+        /> */}
       </div>
       <FinancePage />
     </IcfProvider>

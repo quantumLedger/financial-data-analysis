@@ -323,6 +323,7 @@ export default function AIChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chartEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [currentUpload, setCurrentUpload] = useState<FileUpload | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [currentChartIndex, setCurrentChartIndex] = useState(0);
@@ -563,6 +564,11 @@ export default function AIChat() {
     };
     setMessages((prev) => [...prev, userMessage, thinkingMessage]);
     setInput("");
+    // Reset textarea height after clearing input
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = "44px"; // Reset to min height
+    }
     setIsLoading(true);
     const apiMessages = [...messages, userMessage].map((msg) => {
       if (msg.file) {
@@ -1017,6 +1023,7 @@ export default function AIChat() {
               </Button>
 
               <Textarea
+                ref={textareaRef}
                 value={input}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
