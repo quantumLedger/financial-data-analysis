@@ -584,8 +584,8 @@ Focus on clear financial insights and let the visualization enhance understandin
         !chartData.data ||
         !Array.isArray(chartData.data)
       ) {
-        // Store data for logging before type narrowing
-        const dataForLogging = chartData.data;
+        // Store data for logging before type narrowing (use any to handle string case)
+        const dataForLogging: any = chartData.data;
         const dataSample = typeof dataForLogging === 'string' 
           ? dataForLogging.substring(0, 100) 
           : dataForLogging 
