@@ -565,7 +565,11 @@ Focus on clear financial insights and let the visualization enhance understandin
         : "No tool used",
     });
 
-    const toolUseContent = response.content.find((c) => c.type === "tool_use");
+    // Collect ALL tool_use blocks (not just the first one)
+    const allToolUseBlocks = response.content.filter((c) => c.type === "tool_use");
+    // Get the first tool_use block for processing (we'll process all generate_graph_data tools)
+    const toolUseContent = allToolUseBlocks.find((c: any) => c.name === "generate_graph_data") || allToolUseBlocks[0] || null;
+    
     // Collect ALL text content blocks (not just the first one)
     const textContents = response.content.filter((c) => c.type === "text");
     // Concatenate all text blocks to get the complete response
@@ -657,24 +661,52 @@ Focus on clear financial insights and let the visualization enhance understandin
       };
     };
 
-    const processedChartData = toolUseContent
-      ? processToolResponse(toolUseContent)
-      : null;
+    let processedChartData = null;
+    try {
+      processedChartData = toolUseContent
+        ? processToolResponse(toolUseContent)
+        : null;
+    } catch (error) {
+      console.error("❌ Error processing tool response:", error);
+      // Continue without chart data if processing fails
+    }
 
-    return new Response(
-      JSON.stringify({
+    // Prepare response data - only include serializable properties
+    const responseData = {
+      content: fullTextContent || "",
+      hasToolUse: response.content.some((c) => c.type === "tool_use"),
+      toolUse: toolUseContent ? {
+        type: toolUseContent.type,
+        id: toolUseContent.id,
+        name: toolUseContent.name,
+        input: toolUseContent.input,
+      } : null,
+      chartData: processedChartData,
+    };
+
+    // Ensure the response body is properly serialized with error handling
+    let responseBody: string;
+    try {
+      responseBody = JSON.stringify(responseData);
+    } catch (serializationError) {
+      console.error("❌ Error serializing response:", serializationError);
+      // Fallback response without tool data
+      responseBody = JSON.stringify({
         content: fullTextContent || "",
-        hasToolUse: response.content.some((c) => c.type === "tool_use"),
-        toolUse: toolUseContent,
-        chartData: processedChartData,
-      }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-cache",
-        },
+        hasToolUse: false,
+        toolUse: null,
+        chartData: null,
+        error: "Failed to serialize response data",
+      });
+    }
+
+    return new Response(responseBody, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
       },
-    );
+    });
   } catch (error) {
     console.error("❌ Finance API Error: ", error);
     console.error("Full error details:", {
