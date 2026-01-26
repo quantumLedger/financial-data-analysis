@@ -323,7 +323,6 @@ export default function AIChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chartEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [currentUpload, setCurrentUpload] = useState<FileUpload | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [currentChartIndex, setCurrentChartIndex] = useState(0);
@@ -331,6 +330,8 @@ export default function AIChat() {
   const [isScrollLocked, setIsScrollLocked] = useState(false);
   const resizableContainerRef = useRef<HTMLDivElement>(null);
   const [includeLiveData, setIncludeLiveData] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const [portfolioJson, setPortfolioJson] = useState<any | null>(null);
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
@@ -345,6 +346,41 @@ export default function AIChat() {
     return 33.33;
   });
   const [isResizing, setIsResizing] = useState(false);
+
+  useEffect(() => {
+    async function loadChatHistory() {
+      if (!icfObj || !icfObj.mapping_id) return;
+      
+      try {
+        setIsLoadingHistory(true);
+        const response = await fetch(
+          `/api/chat/history?mappingId=${icfObj.mapping_id}`
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.session && data.messages && data.messages.length > 0) {
+            setCurrentSessionId(data.session.id);
+            const loadedMessages: Message[] = data.messages.map((msg: any) => ({
+              id: msg.id,
+              role: msg.role,
+              content: msg.content,
+              file: msg.file,
+              chartData: msg.chartData,
+              hasToolUse: msg.hasToolUse,
+            }));
+            setMessages(loadedMessages);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading chat history:", error);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    }
+    
+    loadChatHistory();
+  }, [icfObj?.mapping_id]);
 
   useEffect(() => {
     async function loadOnce() {
@@ -426,7 +462,6 @@ export default function AIChat() {
     }
   }, [messages]);
 
-  // Save panel width to localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('leftPanelWidth', leftPanelWidth.toString());
@@ -541,6 +576,41 @@ export default function AIChat() {
     }
   };
 
+  const saveMessageToDB = async (message: Message) => {
+    if (!icfObj || !icfObj.mapping_id) return;
+    
+    try {
+      const response = await fetch("/api/chat/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mappingId: icfObj.mapping_id,
+          firmName: firmName,
+          accountName: accountName,
+          message: {
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            hasFile: !!message.file,
+            fileData: message.file,
+            hasToolUse: message.hasToolUse || false,
+            chartData: message.chartData,
+            toolUse: message.hasToolUse ? { type: "tool_use" } : undefined,
+          },
+        }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.sessionId && !currentSessionId) {
+          setCurrentSessionId(data.sessionId);
+        }
+      }
+    } catch (error) {
+      console.error("Error saving message to database:", error);
+    }
+  };
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!input.trim() && !currentUpload) return;
@@ -553,8 +623,6 @@ export default function AIChat() {
       file: currentUpload || undefined,
       chartData: null,
     };
-    // Clear the current upload from the input UI as soon as the message is sent
-    // so the file preview/logo above the chat doesn't persist after sending.
     setCurrentUpload(null);
     const thinkingMessage: Message = {
       id: crypto.randomUUID(),
@@ -563,12 +631,10 @@ export default function AIChat() {
       chartData: null,
     };
     setMessages((prev) => [...prev, userMessage, thinkingMessage]);
+    
+    saveMessageToDB(userMessage);
+    
     setInput("");
-    // Reset textarea height after clearing input
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = "44px"; // Reset to min height
-    }
     setIsLoading(true);
     const apiMessages = [...messages, userMessage].map((msg) => {
       if (msg.file) {
@@ -611,30 +677,37 @@ export default function AIChat() {
       });
       if (!response.ok) throw new Error(String(response.status));
       const data: APIResponse = await response.json();
+      const assistantMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: data.content,
+        hasToolUse: data.hasToolUse || !!data.toolUse,
+        chartData:
+          data.chartData || (data.toolUse?.input as ChartData) || null,
+      };
       setMessages((prev) => {
         const newMessages = [...prev];
-        newMessages[newMessages.length - 1] = {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: data.content,
-          hasToolUse: data.hasToolUse || !!data.toolUse,
-          chartData:
-            data.chartData || (data.toolUse?.input as ChartData) || null,
-        };
+        newMessages[newMessages.length - 1] = assistantMessage;
         return newMessages;
       });
+      
+      saveMessageToDB(assistantMessage);
+      
       setCurrentUpload(null);
     } catch {
+      const errorMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "I encountered an error. Please try again.",
+        chartData: null,
+      };
       setMessages((prev) => {
         const newMessages = [...prev];
-        newMessages[newMessages.length - 1] = {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: "I encountered an error. Please try again.",
-          chartData: null,
-        };
+        newMessages[newMessages.length - 1] = errorMessage;
         return newMessages;
       });
+      
+      saveMessageToDB(errorMessage);
     } finally {
       setIsLoading(false);
       setIsScrollLocked(false);
@@ -732,6 +805,9 @@ export default function AIChat() {
       chartData: null,
     };
     setMessages((prev) => [...prev, userMsg, thinkingMsg]);
+    
+    saveMessageToDB(userMsg);
+    
     setIsLoading(true);
     const msgs = [{ role: "user", content: initializePromptHidden }];
     const body = { messages: msgs, model: selectedModel, icfMapping: icfObj };
@@ -743,28 +819,34 @@ export default function AIChat() {
       });
       if (!res.ok) throw new Error(String(res.status));
       const data: APIResponse = await res.json();
+      const assistantMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: data.content,
+        hasToolUse: data.hasToolUse || !!data.toolUse,
+        chartData: data.chartData || (data.toolUse?.input as ChartData) || null,
+      };
       setMessages((prev) => {
         const out = [...prev];
-        out[out.length - 1] = {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: data.content,
-          hasToolUse: data.hasToolUse || !!data.toolUse,
-          chartData: data.chartData || (data.toolUse?.input as ChartData) || null,
-        };
+        out[out.length - 1] = assistantMessage;
         return out;
       });
+      
+      saveMessageToDB(assistantMessage);
     } catch {
+      const errorMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "Initialization failed. Please try again.",
+        chartData: null,
+      };
       setMessages((prev) => {
         const out = [...prev];
-        out[out.length - 1] = {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: "Initialization failed. Please try again.",
-          chartData: null,
-        };
+        out[out.length - 1] = errorMessage;
         return out;
       });
+      
+      saveMessageToDB(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -1023,7 +1105,6 @@ export default function AIChat() {
               </Button>
 
               <Textarea
-                ref={textareaRef}
                 value={input}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
