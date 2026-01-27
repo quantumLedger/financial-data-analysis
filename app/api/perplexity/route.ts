@@ -1,5 +1,6 @@
 // app/api/perplexity/route.ts
 import { NextRequest } from "next/server";
+import { PERPLEXITY_API_KEY } from "@/lib/config";
 
 // Use Node.js runtime for better API compatibility
 export const runtime = "nodejs";
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const apiKey = process.env.PERPLEXITY_API_KEY;
+    const apiKey = PERPLEXITY_API_KEY;
     if (!apiKey) {
       console.error("PERPLEXITY_API_KEY is not set in environment variables");
       return new Response(

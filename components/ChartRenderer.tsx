@@ -32,6 +32,8 @@ import type { ChartData } from "@/types/chart";
 
 function BarChartComponent({ data }: { data: ChartData }) {
   const dataKey = Object.keys(data.chartConfig)[0];
+  // Ensure data.data is an array
+  const safeData = Array.isArray(data.data) ? data.data : [];
 
   return (
     <Card>
@@ -41,7 +43,7 @@ function BarChartComponent({ data }: { data: ChartData }) {
       </CardHeader>
       <CardContent>
         <ChartContainer config={data.chartConfig}>
-          <BarChart accessibilityLayer data={data.data}>
+          <BarChart accessibilityLayer data={safeData}>
             <CartesianGrid vertical={false} />
             <XAxis
               dataKey={data.config.xAxisKey}
@@ -89,6 +91,9 @@ function BarChartComponent({ data }: { data: ChartData }) {
 }
 
 function MultiBarChartComponent({ data }: { data: ChartData }) {
+  // Ensure data.data is an array
+  const safeData = Array.isArray(data.data) ? data.data : [];
+  
   return (
     <Card>
       <CardHeader>
@@ -97,7 +102,7 @@ function MultiBarChartComponent({ data }: { data: ChartData }) {
       </CardHeader>
       <CardContent>
         <ChartContainer config={data.chartConfig}>
-          <BarChart accessibilityLayer data={data.data}>
+          <BarChart accessibilityLayer data={safeData}>
             <CartesianGrid vertical={false} />
             <XAxis
               dataKey={data.config.xAxisKey}
@@ -148,6 +153,9 @@ function MultiBarChartComponent({ data }: { data: ChartData }) {
 }
 
 function LineChartComponent({ data }: { data: ChartData }) {
+  // Ensure data.data is an array
+  const safeData = Array.isArray(data.data) ? data.data : [];
+  
   return (
     <Card>
       <CardHeader>
@@ -158,7 +166,7 @@ function LineChartComponent({ data }: { data: ChartData }) {
         <ChartContainer config={data.chartConfig}>
           <LineChart
             accessibilityLayer
-            data={data.data}
+            data={safeData}
             margin={{
               left: 12,
               right: 12,
@@ -216,11 +224,15 @@ function LineChartComponent({ data }: { data: ChartData }) {
 }
 
 function PieChartComponent({ data }: { data: ChartData }) {
+  // Ensure data.data is an array
+  const safeData = Array.isArray(data.data) ? data.data : [];
+  
   const totalValue = React.useMemo(() => {
-    return data.data.reduce((acc, curr) => acc + curr.value, 0);
-  }, [data.data]);
+    if (!Array.isArray(safeData) || safeData.length === 0) return 0;
+    return safeData.reduce((acc, curr) => acc + (curr?.value || 0), 0);
+  }, [safeData]);
 
-  const chartData = data.data.map((item, index) => {
+  const chartData = safeData.map((item, index) => {
     return {
       ...item,
       // Use the same color variable pattern as other charts
@@ -314,6 +326,9 @@ function AreaChartComponent({
   data: ChartData;
   stacked?: boolean;
 }) {
+  // Ensure data.data is an array
+  const safeData = Array.isArray(data.data) ? data.data : [];
+  
   return (
     <Card>
       <CardHeader>
@@ -324,7 +339,7 @@ function AreaChartComponent({
         <ChartContainer config={data.chartConfig}>
           <AreaChart
             accessibilityLayer
-            data={data.data}
+            data={safeData}
             margin={{
               left: 12,
               right: 12,

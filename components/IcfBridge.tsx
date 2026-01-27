@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { ALLOWED_PARENT_ORIGINS } from "@/lib/config";
 
 export type IcfMapping = any;
 

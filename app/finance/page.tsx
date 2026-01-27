@@ -15,11 +15,15 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Send,
   ChevronDown,
+  ChevronUp,
   Paperclip,
   ChartArea,
   FileInput,
   MessageCircleQuestion,
   ChartColumnBig,
+  ArrowUp,
+  ArrowDown,
+  ChevronRight,
 } from "lucide-react";
 import FilePreview from "@/components/FilePreview";
 import { ChartRenderer } from "@/components/ChartRenderer";
@@ -31,7 +35,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Switch } from "@/components/ui/switch";
 import type { ChartData } from "@/types/chart";
 import TopNavBar from "@/components/TopNavBar";
 import {
@@ -41,6 +44,8 @@ import {
 } from "@/utils/fileHandling";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ChatStore } from "@/lib/stores/chatStore";
+import type { ChatMessage } from "@/lib/api/chat";
 
 type ChartMsg = ChartData;
 
@@ -138,7 +143,9 @@ enum PORTFOLIO_TYPE {
   MASTER_PROPOSED = "MASTER_PROPOSED",
 }
 
-const API_URL ="https://apis.weidentify.ai";
+import { WEIDENTIFY_API_URL } from '@/lib/config';
+
+const API_URL = WEIDENTIFY_API_URL;
 
 async function fetchCombinedCSVsByFirm(
   clientId: string,
@@ -181,38 +188,93 @@ const SafeChartRenderer: React.FC<{ data: ChartData }> = ({ data }) => {
   }
 };
 
-const MessageComponent: React.FC<MessageComponentProps> = ({ message }) => {
+const MessageComponent: React.FC<MessageComponentProps & { 
+  isCollapsed?: boolean; 
+  onToggleCollapse?: () => void;
+  isOldMessage?: boolean;
+  messageIndex?: number;
+  totalMessages?: number;
+}> = ({ message, isCollapsed = false, onToggleCollapse, isOldMessage = false, messageIndex = 0, totalMessages = 0 }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isLongContent, setIsLongContent] = useState(false);
+  const MAX_PREVIEW_LENGTH = 500; // Characters to show before "Show more"
+
+  useEffect(() => {
+    if (contentRef.current) {
+      const textLength = message.content.length;
+      setIsLongContent(textLength > MAX_PREVIEW_LENGTH);
+    }
+  }, [message.content]);
+
+  // Only collapse assistant messages, not user messages
+  const shouldShowCollapse = message.role === "assistant" && isOldMessage && messageIndex < totalMessages - 5;
+  const displayContent = isLongContent && !isExpanded 
+    ? message.content.substring(0, MAX_PREVIEW_LENGTH) + '...'
+    : message.content;
+
   return (
-    <div className="flex items-start gap-2">
+    <div className={`flex items-start gap-2 ${shouldShowCollapse && isCollapsed ? 'opacity-60' : ''}`}>
       {message.role === "assistant" && (
-        <Avatar className="w-8 h-8 border">
+        <Avatar className="w-8 h-8 border flex-shrink-0">
           <AvatarImage src="/ant-logo.svg" alt="AI Assistant Avatar" />
           <AvatarFallback>AI</AvatarFallback>
         </Avatar>
       )}
       <div
-        className={`flex flex-col max-w-[75%] ${
-          message.role === "user" ? "ml-auto" : ""
+        className={`flex flex-col ${
+          message.role === "user" ? "max-w-[75%] ml-auto" : "w-full"
         }`}
       >
-        <div
-          className={`p-3 rounded-md text-[12px] ${
-            message.role === "user"
-              ? "bg-primary text-primary-foreground"
-              : "bg-muted border"
-          }`}
-        >
-          {message.content === "thinking" ? (
-            <div className="flex items-center">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900 mr-2" />
-              <span>Thinking...</span>
-            </div>
-          ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-              {message.content}
-            </ReactMarkdown>
-          )}
-        </div>
+        {shouldShowCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground mb-1 transition-colors"
+          >
+            {isCollapsed ? (
+              <>
+                <ChevronRight className="w-3 h-3" />
+                <span>Show message</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-3 h-3" />
+                <span>Hide message</span>
+              </>
+            )}
+          </button>
+        )}
+        {(!shouldShowCollapse || !isCollapsed) && (
+          <div
+            className={`p-3 rounded-md text-[12px] ${
+              message.role === "user"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted border"
+            }`}
+            ref={contentRef}
+          >
+            {message.content === "thinking" ? (
+              <div className="flex items-center">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900 mr-2" />
+                <span>Thinking...</span>
+              </div>
+            ) : (
+              <>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                  {displayContent}
+                </ReactMarkdown>
+                {isLongContent && (
+                  <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="mt-2 text-[10px] text-muted-foreground hover:text-foreground underline"
+                  >
+                    {isExpanded ? 'Show less' : 'Show more'}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -245,21 +307,33 @@ function normalizeIcf(v: any) {
   return v.icfMapping ? v.icfMapping : v;
 }
 
+// Default ICF mapping to use when no params are provided
+const DEFAULT_ICF_MAPPING = {
+  csv_url_master: "identify-ai/ROTHSCHILD/investment-banker-id-11/client-id-35/icf_mapping_id_74_PortfolioTypeEnum.MASTER_ORIGINAL.csv",
+  report_s3_key: null,
+  csv_url_proposed: "identify-ai/ROTHSCHILD/investment-banker-id-11/client-id-35/icf_mapping_id_74_PortfolioTypeEnum.MASTER_ORIGINAL.csv",
+  excel_ai_history_proposed: "",
+  version_id: "NA",
+  excel_ai_history_master: "",
+  firm_name: "ROTHSCHILD",
+  created_at: "2026-01-15T16:29:38",
+  investment_banker_id: 11,
+  status: "completed",
+  updated_at: "2026-01-24T03:44:15",
+  id: 74,
+  available_liquid_cash: 0.0,
+  portfolio_s3_key: null,
+  client_id: 35,
+  firm_account_name: "00099",
+  portfolio_status: "NOT_STARTED",
+  pdf_url: "identify.ai/investment_banker_11/client_id_35/firm_ROTHSCHILD/00099-pages-4-5-2026-01-15-16-29.pdf",
+  report_id: "d9cebd7f-ed25-4fd6-b4d4-ce83b1850192"
+};
+
 export default function AIChat() {
   const [icfObj, setIcfObj] = useState<any | null>(null);
 
   useEffect(() => {
-    const fromLS = () => {
-      try {
-        const raw = localStorage.getItem("icfObj");
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        return normalizeIcf(parsed);
-      } catch {
-        return null;
-      }
-    };
-
     const fromURL = () => {
       try {
         const search = window.location.search.startsWith("?")
@@ -274,45 +348,49 @@ export default function AIChat() {
           const qs = new URLSearchParams(hash);
           enc = qs.get("icf");
         }
-        if (!enc) return null;
+        if (!enc) {
+          return null;
+        }
         const json = decodeURIComponent(enc);
         const parsed = JSON.parse(json);
-        return normalizeIcf(parsed);
-      } catch {
+        const normalized = normalizeIcf(parsed);
+        return normalized;
+      } catch (error) {
+        console.error('[ERROR] Failed to parse ICF from URL:', error);
         return null;
       }
     };
 
-    const urlVal = fromURL();
-    if (urlVal) {
-      localStorage.setItem("icfObj", JSON.stringify(urlVal));
-      setIcfObj(urlVal);
-      return;
-    }
-
-    const lsVal = fromLS();
-    if (lsVal) setIcfObj(lsVal);
-
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "icfObj") {
-        try {
-          const next = e.newValue ? normalizeIcf(JSON.parse(e.newValue)) : null;
-          setIcfObj(next);
-        } catch {
-          setIcfObj(null);
-        }
+    const updateIcfFromURL = () => {
+      const urlVal = fromURL();
+      if (urlVal) {
+        setIcfObj(urlVal);
+      } else {
+        setIcfObj(DEFAULT_ICF_MAPPING);
       }
     };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+
+    // Initial load
+    updateIcfFromURL();
+
+    // Listen for hash changes to update ICF when URL changes
+    const onHashChange = () => {
+      updateIcfFromURL();
+    };
+    
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  const firmName = icfObj?.firm_name || "NA";
-  const accountName = icfObj?.firm_account_name || "NA";
-  const proposedCsv = icfObj?.csv_url_proposed || "";
-  const pdfUrl = icfObj?.pdf_url || "";
-  const clientId = String(icfObj?.client_id || "");
-  const bankerId = String(icfObj?.investment_banker_id || "");
+  // Use icfObj or default mapping
+  const effectiveIcfObj = icfObj || DEFAULT_ICF_MAPPING;
+  
+  const firmName = effectiveIcfObj?.firm_name || "NA";
+  const accountName = effectiveIcfObj?.firm_account_name || "NA";
+  const proposedCsv = effectiveIcfObj?.csv_url_proposed || "";
+  const pdfUrl = effectiveIcfObj?.pdf_url || "";
+  const clientId = String(effectiveIcfObj?.client_id || "");
+  const bankerId = String(effectiveIcfObj?.investment_banker_id || "");
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -330,11 +408,52 @@ export default function AIChat() {
   const contentRef = useRef<HTMLDivElement>(null);
   const [isScrollLocked, setIsScrollLocked] = useState(false);
   const resizableContainerRef = useRef<HTMLDivElement>(null);
-  const [includeLiveData, setIncludeLiveData] = useState(false);
+  const [includeLiveData, setIncludeLiveData] = useState(true);
 
   const [portfolioJson, setPortfolioJson] = useState<any | null>(null);
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
+  
+  // Chat store for persistence
+  const [chatStore, setChatStore] = useState<ChatStore | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const fabRef = useRef<HTMLDivElement>(null);
+  
+  // Expanded messages state (messages that are explicitly expanded, old messages are collapsed by default)
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
+  const [showJumpButtons, setShowJumpButtons] = useState(false);
+
+  // Ensure FAB stays fixed even when scrolling or in iframe
+  useEffect(() => {
+    const fabElement = fabRef.current;
+    if (!fabElement) return;
+
+    // Force fixed positioning
+    const ensureFixed = () => {
+      fabElement.style.position = 'fixed';
+      fabElement.style.bottom = '100px';
+      fabElement.style.left = '50%';
+      fabElement.style.transform = 'translateX(-50%)';
+      fabElement.style.zIndex = '99999';
+    };
+
+    ensureFixed();
+    
+    // Re-apply on scroll to ensure it stays fixed
+    const handleScroll = () => {
+      ensureFixed();
+    };
+
+    window.addEventListener('scroll', handleScroll, true);
+    document.addEventListener('scroll', handleScroll, true);
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      document.removeEventListener('scroll', handleScroll, true);
+    };
+  }, []);
   
   // Resizable panel state
   const [leftPanelWidth, setLeftPanelWidth] = useState(() => {
@@ -346,11 +465,86 @@ export default function AIChat() {
   });
   const [isResizing, setIsResizing] = useState(false);
 
+  // Initialize chat store when ICF mapping is available
+  useEffect(() => {
+    // Normalize ICF object first (extract icfMapping if it exists, otherwise use as-is)
+    const rawIcfObj = icfObj || DEFAULT_ICF_MAPPING;
+    const normalizedIcfObj = normalizeIcf(rawIcfObj) || rawIcfObj;
+    const currentIcfObj = normalizedIcfObj;
+    
+    // After normalization, the id should be directly on the object
+    const mappingId = currentIcfObj?.id || null;
+    const firmNameForChat = currentIcfObj?.firm_name || null;
+    const firmAccountNameForChat = currentIcfObj?.firm_account_name || null;
+    
+    // Clear messages immediately when switching ICF to prevent showing old data
+    setMessages([]);
+    setLoadingHistory(true);
+    
+    // Create a flag to track if this effect is still active
+    let isActive = true;
+    
+    const store = new ChatStore(
+      'FINANCE',
+      mappingId,
+      firmNameForChat,
+      firmAccountNameForChat
+    );
+    setChatStore(store);
+    
+    // Load historical messages
+    store.initialize().then(() => {
+      if (!isActive) return;
+      
+      const chatMessages = store.getMessages();
+      const convertedMessages: Message[] = chatMessages.map((msg: ChatMessage) => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        hasToolUse: msg.hasToolUse,
+        file: msg.file && msg.hasFile ? msg.file : undefined,
+        chartData: msg.chartData || null,
+      }));
+      
+      setMessages(convertedMessages);
+      setLoadingHistory(false);
+    }).catch((error) => {
+      if (!isActive) return;
+      console.error('[ERROR] Failed to load chat history:', error);
+      setLoadingHistory(false);
+      setMessages([]);
+    });
+    
+    // Subscribe to store updates
+    const unsubscribe = store.subscribe(() => {
+      if (!isActive) return;
+      
+      const chatMessages = store.getMessages();
+      const convertedMessages: Message[] = chatMessages.map((msg: ChatMessage) => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        hasToolUse: msg.hasToolUse,
+        file: msg.file && msg.hasFile ? msg.file : undefined,
+        chartData: msg.chartData || null,
+      }));
+      
+      setMessages(convertedMessages);
+    });
+    
+    return () => {
+      isActive = false;
+      unsubscribe();
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, [icfObj]);
+
   useEffect(() => {
     async function loadOnce() {
       if (!API_URL) return;
-      if (!icfObj) return;
-      if (!clientId || !bankerId || !firmName) return;
+      if (!clientId || !bankerId || !firmName || firmName === "NA") return;
       if (portfolioJson) return;
       try {
         setLoadingPortfolio(true);
@@ -369,7 +563,8 @@ export default function AIChat() {
       }
     }
     loadOnce();
-  }, [icfObj, clientId, bankerId, firmName, portfolioJson]);
+  }, [clientId, bankerId, firmName, portfolioJson]);
+
 
   useEffect(() => {
     const scrollToBottom = () => {
@@ -600,7 +795,7 @@ export default function AIChat() {
     const requestBody = {
       messages: apiMessages,
       model: selectedModel,
-      icfMapping: icfObj,
+      icfMapping: effectiveIcfObj,
       includeLiveData: includeLiveData,
     };
     try {
@@ -611,18 +806,62 @@ export default function AIChat() {
       });
       if (!response.ok) throw new Error(String(response.status));
       const data: APIResponse = await response.json();
+      const assistantMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: data.content,
+        hasToolUse: data.hasToolUse || !!data.toolUse,
+        chartData:
+          data.chartData || (data.toolUse?.input as ChartData) || null,
+      };
+      
       setMessages((prev) => {
         const newMessages = [...prev];
-        newMessages[newMessages.length - 1] = {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: data.content,
-          hasToolUse: data.hasToolUse || !!data.toolUse,
-          chartData:
-            data.chartData || (data.toolUse?.input as ChartData) || null,
-        };
+        newMessages[newMessages.length - 1] = assistantMessage;
         return newMessages;
       });
+      
+      // Save both user and assistant messages to chat store
+      if (chatStore) {
+        try {
+          // Save user message
+          await chatStore.saveMessage({
+            id: userMessage.id,
+            role: 'user',
+            content: userMessage.content,
+            hasFile: !!userMessage.file,
+            file: userMessage.file || null,
+            hasToolUse: false,
+            chartData: null,
+            toolUse: null,
+          }, userMessage.file ? {
+            base64: userMessage.file.base64,
+            fileName: userMessage.file.fileName,
+            mediaType: userMessage.file.mediaType,
+            isText: userMessage.file.isText,
+          } : undefined);
+          
+          // Save assistant message
+          await chatStore.saveMessage({
+            id: assistantMessage.id,
+            role: 'assistant',
+            content: assistantMessage.content,
+            hasFile: false,
+            file: null,
+            hasToolUse: assistantMessage.hasToolUse || false,
+            chartData: assistantMessage.chartData,
+            toolUse: data.toolUse || null,
+          });
+        } catch (error) {
+          console.error('[ERROR] Failed to save messages to chat store:', error);
+          toast({
+            title: "Warning",
+            description: "Message saved locally but failed to sync to server",
+            variant: "destructive",
+          });
+        }
+      }
+      
       setCurrentUpload(null);
     } catch {
       setMessages((prev) => {
@@ -667,19 +906,26 @@ export default function AIChat() {
   const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const textarea = event.target;
     setInput(textarea.value);
+    
+    // Reset height to auto to get the correct scrollHeight
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 300)}px`;
+    
+    // Calculate new height (limit max height to 200px)
+    const newHeight = Math.min(textarea.scrollHeight, 200);
+    
+    // Set new height - it will grow upward naturally with items-end alignment
+    textarea.style.height = `${newHeight}px`;
   };
 
   const hasCharts = messages.some((m) => m.chartData);
 
-  const initializePromptHidden = (() => {
+    const initializePromptHidden = (() => {
     const payload = {
       firmName,
       accountName,
       proposedCsv,
       pdfUrl,
-      icfMapping: icfObj,
+      icfMapping: effectiveIcfObj,
       portfolioData: portfolioJson,
     };
     const lines: string[] = [];
@@ -710,7 +956,7 @@ export default function AIChat() {
   const initializePromptDisplay = `Initialize memory and analyze data for ${accountName} at ${firmName}. (details hidden)`;
 
   const handleInitialize = async () => {
-    if (!icfObj || !proposedCsv || !portfolioJson) {
+    if (!proposedCsv || !portfolioJson) {
       toast({
         title: "Missing data",
         description: "Required mapping or portfolio data not available",
@@ -734,7 +980,7 @@ export default function AIChat() {
     setMessages((prev) => [...prev, userMsg, thinkingMsg]);
     setIsLoading(true);
     const msgs = [{ role: "user", content: initializePromptHidden }];
-    const body = { messages: msgs, model: selectedModel, icfMapping: icfObj };
+    const body = { messages: msgs, model: selectedModel, icfMapping: effectiveIcfObj };
     try {
       const res = await fetch("/api/finance", {
         method: "POST",
@@ -743,17 +989,53 @@ export default function AIChat() {
       });
       if (!res.ok) throw new Error(String(res.status));
       const data: APIResponse = await res.json();
+      const assistantMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: data.content,
+        hasToolUse: data.hasToolUse || !!data.toolUse,
+        chartData: data.chartData || (data.toolUse?.input as ChartData) || null,
+      };
+      
       setMessages((prev) => {
         const out = [...prev];
-        out[out.length - 1] = {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: data.content,
-          hasToolUse: data.hasToolUse || !!data.toolUse,
-          chartData: data.chartData || (data.toolUse?.input as ChartData) || null,
-        };
+        out[out.length - 1] = assistantMessage;
         return out;
       });
+      
+      // Save initialization messages to chat store
+      if (chatStore) {
+        try {
+          await chatStore.saveMessage({
+            id: userMsg.id,
+            role: 'user',
+            content: userMsg.content,
+            hasFile: false,
+            file: null,
+            hasToolUse: false,
+            chartData: null,
+            toolUse: null,
+          });
+          
+          await chatStore.saveMessage({
+            id: assistantMessage.id,
+            role: 'assistant',
+            content: assistantMessage.content,
+            hasFile: false,
+            file: null,
+            hasToolUse: assistantMessage.hasToolUse || false,
+            chartData: assistantMessage.chartData,
+            toolUse: data.toolUse || null,
+          });
+        } catch (error) {
+          console.error('Failed to save initialization messages:', error);
+          toast({
+            title: "Warning",
+            description: "Initialization saved locally but failed to sync to server",
+            variant: "destructive",
+          });
+        }
+      }
     } catch {
       setMessages((prev) => {
         const out = [...prev];
@@ -771,7 +1053,7 @@ export default function AIChat() {
   };
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-screen" style={{ position: 'relative', overflow: 'visible' }}>
       <TopNavBar
         features={{
           showDomainSelector: false,
@@ -780,9 +1062,123 @@ export default function AIChat() {
         }}
       />
 
+      {/* Floating Action Button (FAB) - Fixed at bottom, stays visible even in iframe */}
+      <div 
+        ref={fabRef}
+        id="chat-fab-input"
+        style={{
+          position: 'fixed',
+          bottom: '100px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '90%',
+          maxWidth: '56rem',
+          zIndex: 99999,
+          willChange: 'transform',
+          pointerEvents: 'auto',
+          isolation: 'isolate',
+        }}
+        className="fixed bottom-[30px] left-1/2 -translate-x-1/2 w-[90%] max-w-4xl"
+      >
+        <form onSubmit={handleSubmit} className="flex flex-col">
+          {currentUpload && (
+            <div className="mb-2">
+              <FilePreview
+                file={currentUpload}
+                onRemove={() => setCurrentUpload(null)}
+              />
+            </div>
+          )}
+
+          <div className="relative bg-background/95 backdrop-blur-sm border rounded-xl shadow-2xl p-2" style={{ boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
+
+            {/* Input field with all controls inside - grows upward */}
+            <div className="relative flex items-end">
+              {/* Left separator */}
+              <div className="absolute left-0 top-0 bottom-0 w-px bg-border z-10" />
+
+              {/* File attachment button - positioned at bottom left */}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isLoading || isUploading}
+                className="absolute left-2 z-10 hover:bg-muted"
+                style={{ bottom: '8px' }}
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
+
+              <Textarea
+                ref={textareaRef}
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask questions, @ for context, / for commands"
+                disabled={isLoading || isUploading}
+                className="min-h-[44px] max-h-[200px] resize-none pl-12 py-3 pr-24 rounded-xl border-0 bg-transparent focus-visible:ring-0 focus-visible:border-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm overflow-y-auto"
+                rows={1}
+              />
+
+              {/* Right separator */}
+              <div className="absolute right-20 top-0 bottom-0 w-px bg-border z-10" />
+
+              {/* Live Data button - positioned at bottom right */}
+              <Button
+                type="button"
+                variant={includeLiveData ? "default" : "outline"}
+                size="sm"
+                onClick={() => setIncludeLiveData(!includeLiveData)}
+                disabled={isLoading || isUploading}
+                className={`absolute right-24 z-10 px-2 text-[10px] ${
+                  includeLiveData 
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/90' 
+                    : 'border border-border hover:bg-muted'
+                }`}
+                style={{ bottom: '8px', height: '28px' }}
+              >
+                Live Data
+              </Button>
+
+              {/* Send button - positioned at bottom right */}
+              <Button
+                type="submit"
+                disabled={
+                  isLoading || isUploading || (!input.trim() && !currentUpload)
+                }
+                className="absolute right-2 z-10 rounded-full p-0 disabled:opacity-50 bg-primary hover:bg-primary/90"
+                title="Send message"
+                style={{ bottom: '8px', height: '32px', width: '32px' }}
+              >
+                {isLoading ? (
+                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-background border-t-transparent" />
+                ) : (
+                  <Send className="h-3.5 w-3.5 text-primary-foreground" />
+                )}
+              </Button>
+            </div>
+
+            {/* Status text when loading */}
+            {(isLoading || isUploading) && (
+              <div className="absolute -bottom-5 left-0 text-[10px] text-muted-foreground">
+                {isUploading ? "Processing your file..." : "Please wait while we are getting your query..."}
+              </div>
+            )}
+          </div>
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+        </form>
+      </div>
+
       <div 
         ref={resizableContainerRef}
-        className="flex-1 flex bg-background p-4 pt-0 h-[calc(100vh-4rem)] pb-40 resizable-container relative"
+        className="flex-1 flex bg-background mt-0 pt-0 h-[calc(100vh-4rem)] pb-32 resizable-container relative"
       >
         <Card 
           className="flex flex-col h-full transition-all mr-2"
@@ -792,7 +1188,7 @@ export default function AIChat() {
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div>
-                  <CardTitle className="text-[14px]">Financial Assistant</CardTitle>
+                  <CardTitle className="text-[12px]">Financial Assistant</CardTitle>
                   <CardDescription className="text-[11px]">
                     Powered by weidentify.ai
                   </CardDescription>
@@ -820,8 +1216,76 @@ export default function AIChat() {
             </div>
           </CardHeader>
 
-          <CardContent className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory">
-            {messages.length === 0 ? (
+          <CardContent 
+            ref={messagesContainerRef}
+            className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory relative"
+            onScroll={(e) => {
+              // Debounce scroll handler for better performance
+              if (scrollTimeoutRef.current) {
+                clearTimeout(scrollTimeoutRef.current);
+              }
+              
+              const target = e.currentTarget;
+              const scrollTop = target.scrollTop;
+              const scrollHeight = target.scrollHeight;
+              const clientHeight = target.clientHeight;
+              
+              // Show jump buttons when scrolled away from top/bottom
+              const isNearTop = scrollTop < 100;
+              const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+              setShowJumpButtons(!isNearTop && !isNearBottom);
+              
+              scrollTimeoutRef.current = setTimeout(() => {
+                // Lazy load older messages when scrolling near top
+                if (target && scrollTop !== null && scrollTop !== undefined && scrollTop < 200 && chatStore && chatStore.hasMoreChunks()) {
+                  const nextChunk = chatStore.getNextChunkIndex();
+                  if (nextChunk !== null && !chatStore.isLoading()) {
+                    chatStore.loadChunk(nextChunk).catch((error) => {
+                      console.error('Failed to load chunk:', error);
+                    });
+                  }
+                }
+              }, 150); // 150ms debounce
+            }}
+          >
+            {/* Jump to top/bottom buttons */}
+            {showJumpButtons && (
+              <div className="sticky top-4 z-10 flex justify-center gap-2 mb-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-[10px] bg-background/95 backdrop-blur-sm shadow-lg"
+                  onClick={() => {
+                    messagesContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                >
+                  <ArrowUp className="w-3 h-3 mr-1" />
+                  Top
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-[10px] bg-background/95 backdrop-blur-sm shadow-lg"
+                  onClick={() => {
+                    if (messagesContainerRef.current) {
+                      messagesContainerRef.current.scrollTo({ 
+                        top: messagesContainerRef.current.scrollHeight, 
+                        behavior: 'smooth' 
+                      });
+                    }
+                  }}
+                >
+                  <ArrowDown className="w-3 h-3 mr-1" />
+                  Bottom
+                </Button>
+              </div>
+            )}
+            {loadingHistory ? (
+              <div className="flex flex-col items-center justify-center h-full">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4" />
+                <p className="text-[12px] text-muted-foreground">Loading chat history...</p>
+              </div>
+            ) : messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full animate-fade-in-up max-w-[95%] mx-auto">
                 <h2 className="text-[16px] mb-6">
                   Identify AI's Financial Assistant
@@ -836,7 +1300,6 @@ export default function AIChat() {
                     className="w-full text-[11px]"
                     onClick={handleInitialize}
                     disabled={
-                      !icfObj ||
                       !proposedCsv ||
                       !portfolioJson ||
                       loadingPortfolio ||
@@ -879,16 +1342,45 @@ export default function AIChat() {
               </div>
             ) : (
               <div className="space-y-4 min-h-full">
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`animate-fade-in-up ${
-                      message.content === "thinking" ? "animate-pulse" : ""
-                    }`}
-                  >
-                    <MessageComponent message={message} />
+                {chatStore && chatStore.isLoading() && chatStore.hasMoreChunks() && (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2" />
+                    <span className="text-[11px] text-muted-foreground">Loading older messages...</span>
                   </div>
-                ))}
+                )}
+                {messages.map((message, index) => {
+                  const isOldMessage = index < messages.length - 5;
+                  // Only collapse assistant messages, user messages are always visible
+                  // Old assistant messages are collapsed by default unless explicitly expanded
+                  const isCollapsed = message.role === "assistant" && isOldMessage && !expandedMessages.has(message.id);
+                  return (
+                    <div
+                      key={message.id}
+                      className={`animate-fade-in-up ${
+                        message.content === "thinking" ? "animate-pulse" : ""
+                      }`}
+                    >
+                      <MessageComponent 
+                        message={message} 
+                        isCollapsed={isCollapsed}
+                        onToggleCollapse={() => {
+                          setExpandedMessages(prev => {
+                            const next = new Set(prev);
+                            if (next.has(message.id)) {
+                              next.delete(message.id);
+                            } else {
+                              next.add(message.id);
+                            }
+                            return next;
+                          });
+                        }}
+                        isOldMessage={isOldMessage}
+                        messageIndex={index}
+                        totalMessages={messages.length}
+                      />
+                    </div>
+                  );
+                })}
                 <div ref={messagesEndRef} className="h-4" />
               </div>
             )}
@@ -979,99 +1471,6 @@ export default function AIChat() {
           onDotClick={scrollToChart}
         />
       )}
-
-      <form
-        onSubmit={handleSubmit}
-        className="fixed bottom-24 left-1/2 -translate-x-1/2 
-                   w-[90%] max-w-4xl bg-background border rounded-xl shadow-lg
-                   z-50"
-      >
-        <div className="flex flex-col gap-2">
-          {/* Live Data Toggle */}
-          <div className="flex items-center justify-end gap-2 px-3 pt-3">
-            <label htmlFor="live-data-toggle" className="text-[11px] text-muted-foreground cursor-pointer">
-              Include Live Data
-            </label>
-            <Switch
-              id="live-data-toggle"
-              checked={includeLiveData}
-              onCheckedChange={setIncludeLiveData}
-              disabled={isLoading || isUploading}
-            />
-          </div>
-
-          {currentUpload && (
-            <div className="w-full">
-              <FilePreview
-                file={currentUpload}
-                onRemove={() => setCurrentUpload(null)}
-              />
-            </div>
-          )}
-
-          <div className="flex items-end gap-2">
-            <div className="flex-1 relative">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading || isUploading}
-                className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8"
-              >
-                <Paperclip className="h-5 w-5" />
-              </Button>
-
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                placeholder={
-                  isLoading || isUploading
-                    ? "Please wait while your request is processing..."
-                    : "Type your message..."
-                }
-                disabled={isLoading || isUploading}
-                className="min-h-[44px] max-h-[200px] resize-none pl-12 py-3 pr-12 rounded-lg border focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary transition"
-                rows={1}
-              />
-
-              <Button
-                type="submit"
-                disabled={
-                  isLoading || isUploading || (!input.trim() && !currentUpload)
-                }
-                className="absolute right-2 bottom-2 h-8 w-8 rounded-full p-0"
-              >
-                {isLoading ? (
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-
-            <input
-              type="file"
-              ref={fileInputRef}
-              className="hidden"
-              onChange={handleFileSelect}
-            />
-          </div>
-
-          {(isUploading || isLoading) && (
-            <div className="flex items-center gap-2 px-3 pb-3 text-subtitle1 text-muted-foreground">
-              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-muted-foreground" />
-              <span>
-                {isUploading
-                  ? "Processing your file..."
-                  : "Generating your financial analysis..."}
-              </span>
-            </div>
-          )}
-        </div>
-      </form>
     </div>
   );
 }
