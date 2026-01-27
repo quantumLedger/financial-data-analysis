@@ -31,9 +31,12 @@ envContent.split('\n').forEach(line => {
   }
 });
 
+// Always set NODE_ENV to 'development' when running 'next dev'
+envVars.NODE_ENV = 'development';
+
 console.log(`✅ Loaded ${envFile} (${mode} mode)`);
 console.log(`   Port: 4000`);
-console.log(`   Environment: ${envVars.NODE_ENV || (mode === 'prod' ? 'production' : 'development')}`);
+console.log(`   Environment: ${envVars.NODE_ENV}`);
 console.log(`\n🚀 Starting Next.js...\n`);
 
 // Run next dev with the loaded environment

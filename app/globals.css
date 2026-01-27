@@ -1,3 +1,11 @@
+@import "@syncfusion/ej2-base/styles/material.css";
+@import "@syncfusion/ej2-buttons/styles/material.css";
+@import "@syncfusion/ej2-inputs/styles/material.css";
+@import "@syncfusion/ej2-popups/styles/material.css";
+@import "@syncfusion/ej2-dropdowns/styles/material.css";
+@import "@syncfusion/ej2-navigations/styles/material.css";
+@import "@syncfusion/ej2-react-spreadsheet/styles/material.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -113,11 +121,3 @@ body {
         z-index: 99999 !important;
     }
 }
-
-@import "@syncfusion/ej2-base/styles/material.css";
-@import "@syncfusion/ej2-buttons/styles/material.css";
-@import "@syncfusion/ej2-inputs/styles/material.css";
-@import "@syncfusion/ej2-popups/styles/material.css";
-@import "@syncfusion/ej2-dropdowns/styles/material.css";
-@import "@syncfusion/ej2-navigations/styles/material.css";
-@import "@syncfusion/ej2-react-spreadsheet/styles/material.css";
