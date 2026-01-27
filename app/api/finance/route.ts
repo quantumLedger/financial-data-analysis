@@ -2,6 +2,7 @@
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ChartData } from "@/types/chart";
+import { WEIDENTIFY_API_URL, ANTHROPIC_API_KEY, BASE_URL } from "@/lib/config";
 
 // Retry utility function with exponential backoff
 async function retryWithBackoff<T>(
@@ -56,8 +57,6 @@ async function fetchCombinedCSVsByFirm(
   firmName: string,
   portfolioType: "MASTER_ORIGINAL" | "MASTER_PROPOSED"
 ) {
-  const API_URL = "https://apis.weidentify.ai";
-  
   return retryWithBackoff(async () => {
     // Create FormData for multipart/form-data request
     const formData = new FormData();
@@ -67,7 +66,7 @@ async function fetchCombinedCSVsByFirm(
     formData.append("client_id", clientId);
     
     const response = await fetch(
-      `${API_URL}/api/fetch-combined-csvs-by-firm`,
+      `${WEIDENTIFY_API_URL}/api/fetch-csv-from-db`,
       {
         method: "POST",
         body: formData,
@@ -88,7 +87,7 @@ async function fetchCombinedCSVsByFirm(
 
 // Initialize Anthropic client with correct headers
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
+  apiKey: ANTHROPIC_API_KEY!,
 });
 
 export const runtime = "edge";
@@ -323,8 +322,8 @@ export async function POST(req: NextRequest) {
           console.log("Query:", extractedUserQuery.substring(0, 100) + "...");
           
           // Construct base URL from request
-          const protocol = req.headers.get('x-forwarded-proto') || 'http';
-          const host = req.headers.get('host') || 'localhost:3000';
+          const protocol = req.headers.get('x-forwarded-proto') || (BASE_URL.startsWith('https') ? 'https' : 'http');
+          const host = req.headers.get('host') || new URL(BASE_URL).host;
           const baseUrl = `${protocol}://${host}`;
           
           // Call Perplexity API with retry (the Perplexity route has its own retry logic, but we add one more layer)
@@ -600,12 +599,38 @@ Focus on clear financial insights and let the visualization enhance understandin
         }
       }
 
-      if (
-        !chartData.chartType ||
-        !chartData.data ||
-        !Array.isArray(chartData.data)
-      ) {
-        // Store data for logging before type narrowing (use any to handle string case)
+      // Ensure data is an array
+      if (!chartData.data) {
+        console.error("Chart data is missing");
+        throw new Error("Invalid chart data structure: data is missing");
+      }
+
+      // Convert to array if it's not already
+      if (!Array.isArray(chartData.data)) {
+        console.warn("Chart data is not an array, attempting to convert:", typeof chartData.data);
+        
+        // Try to convert object to array
+        if (typeof chartData.data === 'object' && chartData.data !== null) {
+          // If it's an object with numeric keys or array-like, convert it
+          const obj = chartData.data as any;
+          if (Object.keys(obj).length > 0) {
+            // Try to convert object to array of values
+            chartData.data = Object.entries(obj).map(([key, value]) => ({
+              [key]: value,
+              ...(typeof value === 'object' ? value : {})
+            }));
+            console.log("✅ Converted object to array");
+          } else {
+            chartData.data = [];
+          }
+        } else {
+          console.error("Cannot convert chart data to array");
+          throw new Error("Invalid chart data structure: data must be an array or object");
+        }
+      }
+
+      if (!chartData.chartType || chartData.data.length === 0) {
+        // Store data for logging
         const dataForLogging: any = chartData.data;
         const dataSample = typeof dataForLogging === 'string' 
           ? dataForLogging.substring(0, 100) 
@@ -616,11 +641,12 @@ Focus on clear financial insights and let the visualization enhance understandin
         console.error("Invalid chart data structure:", {
           hasChartType: !!chartData.chartType,
           hasData: !!chartData.data,
+          dataLength: Array.isArray(chartData.data) ? chartData.data.length : 'not array',
           dataType: typeof chartData.data,
           isArray: Array.isArray(chartData.data),
           dataSample
         });
-        throw new Error("Invalid chart data structure");
+        throw new Error("Invalid chart data structure: missing chartType or empty data");
       }
 
       // Transform data for pie charts to match expected structure

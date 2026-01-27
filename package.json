@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/run-with-env.js dev",
+    "prod": "node scripts/run-with-env.js prod",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 4000",
+    "start:prod": "next start -p 4000",
     "lint": "next lint"
   },
   "dependencies": {
