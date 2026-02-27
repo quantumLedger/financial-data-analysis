@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useRef, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, Download } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -29,6 +29,54 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import type { ChartData } from "@/types/chart";
+
+function downloadChartAsPng(containerEl: HTMLElement, title: string) {
+  const svgEl = containerEl.querySelector("svg");
+  if (!svgEl) return;
+
+  const width = svgEl.clientWidth || 600;
+  const height = svgEl.clientHeight || 400;
+
+  // Clone and inline computed fill/stroke so colors survive leaving the DOM
+  const cloned = svgEl.cloneNode(true) as SVGElement;
+  cloned.setAttribute("width", String(width));
+  cloned.setAttribute("height", String(height));
+
+  const origAll = [svgEl, ...Array.from(svgEl.querySelectorAll("*"))];
+  const clonedAll = [cloned, ...Array.from(cloned.querySelectorAll("*"))];
+  origAll.forEach((el, i) => {
+    const target = clonedAll[i] as SVGElement;
+    const cs = window.getComputedStyle(el);
+    const fill = cs.getPropertyValue("fill");
+    const stroke = cs.getPropertyValue("stroke");
+    if (fill) target.style.fill = fill;
+    if (stroke) target.style.stroke = stroke;
+  });
+
+  const svgStr = new XMLSerializer().serializeToString(cloned);
+  const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const ctx = canvas.getContext("2d")!;
+    ctx.scale(scale, scale);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+    const link = document.createElement("a");
+    link.href = canvas.toDataURL("image/png");
+    link.download = `${(title || "chart").replace(/[^a-z0-9]/gi, "-").toLowerCase()}.png`;
+    link.click();
+  };
+  img.onerror = () => URL.revokeObjectURL(url);
+  img.src = url;
+}
 
 function BarChartComponent({ data }: { data: ChartData }) {
   const dataKey = Object.keys(data.chartConfig)[0];
@@ -389,20 +437,47 @@ function AreaChartComponent({
 }
 
 export function ChartRenderer({ data }: { data: ChartData }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const downloadPng = useCallback(() => {
+    if (!containerRef.current) return;
+    downloadChartAsPng(containerRef.current, data.config.title || "chart");
+  }, [data.config.title]);
+
+  let chart: React.ReactNode = null;
   switch (data.chartType) {
     case "bar":
-      return <BarChartComponent data={data} />;
+      chart = <BarChartComponent data={data} />;
+      break;
     case "multiBar":
-      return <MultiBarChartComponent data={data} />;
+      chart = <MultiBarChartComponent data={data} />;
+      break;
     case "line":
-      return <LineChartComponent data={data} />;
+      chart = <LineChartComponent data={data} />;
+      break;
     case "pie":
-      return <PieChartComponent data={data} />;
+      chart = <PieChartComponent data={data} />;
+      break;
     case "area":
-      return <AreaChartComponent data={data} />;
+      chart = <AreaChartComponent data={data} />;
+      break;
     case "stackedArea":
-      return <AreaChartComponent data={data} stacked />;
+      chart = <AreaChartComponent data={data} stacked />;
+      break;
     default:
       return null;
   }
+
+  return (
+    <div ref={containerRef} className="relative group">
+      <button
+        onClick={downloadPng}
+        className="absolute top-2 right-2 z-10 p-1.5 rounded-md bg-background/80 border shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted"
+        title="Download chart as PNG"
+      >
+        <Download className="h-3.5 w-3.5 text-muted-foreground" />
+      </button>
+      {chart}
+    </div>
+  );
 }

@@ -2,52 +2,7 @@
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ChartData } from "@/types/chart";
-
-// Retry utility function with exponential backoff
-async function retryWithBackoff<T>(
-  fn: () => Promise<T>,
-  maxRetries: number = 3,
-  initialDelay: number = 1000,
-  maxDelay: number = 10000,
-  retryableErrors?: number[]
-): Promise<T> {
-  let lastError: Error | null = null;
-  
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (error: any) {
-      lastError = error;
-      const statusCode = error?.status || error?.response?.status || error?.statusCode;
-      
-      // Don't retry on client errors (4xx) except 429 (rate limit)
-      if (statusCode && statusCode >= 400 && statusCode < 500 && statusCode !== 429) {
-        throw error;
-      }
-      
-      // Check if error is retryable
-      if (retryableErrors && statusCode && !retryableErrors.includes(statusCode)) {
-        throw error;
-      }
-      
-      // Don't retry on last attempt
-      if (attempt === maxRetries - 1) {
-        throw error;
-      }
-      
-      // Calculate delay with exponential backoff and jitter
-      const delay = Math.min(
-        initialDelay * Math.pow(2, attempt) + Math.random() * 1000,
-        maxDelay
-      );
-      
-      console.log(`⚠️ Retry attempt ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-  
-  throw lastError || new Error("Max retries exceeded");
-}
+import { retryWithBackoff } from "@/lib/retry";
 
 // Portfolio data fetching function with retry
 async function fetchCombinedCSVsByFirm(
@@ -91,7 +46,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 });
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 // Helper to validate base64
 const isValidBase64 = (str: string) => {
@@ -118,6 +73,22 @@ interface ToolSchema {
 }
 
 const tools: ToolSchema[] = [
+  {
+    name: "suggest_follow_ups",
+    description:
+      "Suggest 2-3 short follow-up questions the user might naturally want to ask next, based on the analysis just provided.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        questions: {
+          type: "array" as const,
+          items: { type: "string" as const },
+          description: "2-3 concise follow-up questions",
+        },
+      },
+      required: ["questions"],
+    },
+  },
   {
     name: "generate_graph_data",
     description:
@@ -176,10 +147,73 @@ const tools: ToolSchema[] = [
   },
 ];
 
+// Module-level chart tool response processor
+function processToolResponse(toolUseContent: any) {
+  if (!toolUseContent) return null;
+
+  const chartData = toolUseContent.input as ChartToolResponse;
+
+  if (chartData.data && typeof chartData.data === "string") {
+    const originalDataString: string = chartData.data as string;
+    try {
+      let parsed = JSON.parse(originalDataString);
+      if (typeof parsed === "string") parsed = JSON.parse(parsed);
+      chartData.data = parsed;
+    } catch (parseError) {
+      console.error("❌ Error parsing data string:", parseError);
+      console.error("Data sample:", originalDataString.substring(0, 200));
+      throw new Error("Invalid chart data structure: data is not valid JSON");
+    }
+  }
+
+  if (!chartData.chartType || !chartData.data || !Array.isArray(chartData.data)) {
+    const dataForLogging: any = chartData.data;
+    const dataSample =
+      typeof dataForLogging === "string"
+        ? dataForLogging.substring(0, 100)
+        : dataForLogging
+        ? JSON.stringify(dataForLogging).substring(0, 100)
+        : "null or undefined";
+    console.error("Invalid chart data structure:", {
+      hasChartType: !!chartData.chartType,
+      hasData: !!chartData.data,
+      dataType: typeof chartData.data,
+      isArray: Array.isArray(chartData.data),
+      dataSample,
+    });
+    throw new Error("Invalid chart data structure");
+  }
+
+  if (chartData.chartType === "pie") {
+    chartData.data = chartData.data.map((item: any) => {
+      const valueKey = Object.keys(chartData.chartConfig)[0] ?? "value";
+      const segmentKey = (chartData.config as any).xAxisKey || "segment";
+      return {
+        segment: item[segmentKey] || item.segment || item.category || item.name,
+        value: (item as any)[valueKey] ?? (item as any).value,
+      };
+    });
+    (chartData.config as any).xAxisKey = "segment";
+  }
+
+  const processedChartConfig = Object.entries(chartData.chartConfig).reduce(
+    (acc, [key, config], index) => ({
+      ...acc,
+      [key]: {
+        ...(config as Record<string, unknown>),
+        color: `hsl(var(--chart-${index + 1}))`,
+      },
+    }),
+    {} as Record<string, unknown>,
+  );
+
+  return { ...chartData, chartConfig: processedChartConfig as any };
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { messages, fileData, model, includeLiveData, icfMapping } = await req.json();
-    
+    const { messages, fileData, model, includeLiveData, icfMapping, portfolioData: clientPortfolioData, conversationId } = await req.json();
+
     // Extract icfMapping for use in live data fetching
     const icfData = icfMapping || null;
 
@@ -271,440 +305,283 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // STEP 1: If includeLiveData is true, fetch stock data and Perplexity data
-    let stockData = null;
-    let perplexityData = null;
+    // Always extract the user query — extraction is pure string parsing with no side
+    // effects. Whether it is actually used (Perplexity) is decided by includeLiveData
+    // inside the stream, keeping the flag as the single explicit gate.
     let extractedUserQuery = '';
-    
-    if (includeLiveData) {
-      // STEP 1a: Fetch stock/portfolio data using firmName and accountName
-      if (icfData && icfData.firm_name && icfData.client_id && icfData.investment_banker_id) {
-        try {
-          console.log("📊 STEP 1a: Fetching stock/portfolio data from API...");
-          console.log("Firm:", icfData.firm_name, "Account:", icfData.firm_account_name);
-          
-          stockData = await fetchCombinedCSVsByFirm(
-            String(icfData.client_id),
-            String(icfData.investment_banker_id),
-            icfData.firm_name,
-            "MASTER_PROPOSED"
-          );
-          
-          console.log("✅ STEP 1a: Stock data fetched successfully");
-          console.log("   Data keys:", Object.keys(stockData || {}));
-        } catch (error) {
-          console.error("❌ STEP 1a: Error fetching stock data:", error);
-          // Continue without stock data if fetch fails
-        }
-      } else {
-        console.warn("⚠️ STEP 1a: Missing icfMapping data (firm_name, client_id, or investment_banker_id)");
-      }
-    }
-    
-    // STEP 1b: Fetch Perplexity live data if includeLiveData is true and we have a query
-    if (includeLiveData && messages.length > 0) {
+    if (messages.length > 0) {
       const lastUserMessage = messages[messages.length - 1];
-      
-      // Extract user query from the last message
       if (typeof lastUserMessage.content === 'string') {
         extractedUserQuery = lastUserMessage.content;
       } else if (Array.isArray(lastUserMessage.content)) {
-        // Extract text from content array
-        const textContent = lastUserMessage.content
+        extractedUserQuery = lastUserMessage.content
           .filter((c: any) => c.type === 'text')
           .map((c: any) => c.text)
           .join(' ');
-        extractedUserQuery = textContent;
       }
+    }
+    const protocol = req.headers.get('x-forwarded-proto') || 'http';
+    const host = req.headers.get('host') || 'localhost:3000';
+    const baseUrl = `${protocol}://${host}`;
 
-      if (extractedUserQuery.trim()) {
+    // Stream Claude response to the client via SSE.
+    // All data fetching (portfolio, Perplexity) happens inside the stream so we
+    // can emit status events while the user is waiting.
+    const encoder = new TextEncoder();
+    const sseStream = new ReadableStream({
+      async start(controller) {
+        const send = (data: object) => {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
+          );
+        };
+
         try {
-          console.log("🔍 STEP 1b: Fetching latest data from Perplexity API...");
-          console.log("Query:", extractedUserQuery.substring(0, 100) + "...");
-          
-          // Construct base URL from request
-          const protocol = req.headers.get('x-forwarded-proto') || 'http';
-          const host = req.headers.get('host') || 'localhost:3000';
-          const baseUrl = `${protocol}://${host}`;
-          
-          // Call Perplexity API with retry (the Perplexity route has its own retry logic, but we add one more layer)
-          const responseData = await retryWithBackoff(async () => {
-            const perplexityResponse = await fetch(
-              `${baseUrl}/api/perplexity`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: extractedUserQuery }),
-              }
-            );
+          let stockData: any = null;
+          let perplexityData: any = null;
 
-            if (!perplexityResponse.ok) {
-              const errorText = await perplexityResponse.text().catch(() => "Unknown error");
-              const error: any = new Error(`Perplexity API call failed: ${perplexityResponse.status} - ${errorText}`);
-              error.status = perplexityResponse.status;
-              
-              // Retry on 429 and 5xx errors
-              if (perplexityResponse.status === 429 || perplexityResponse.status >= 500) {
-                throw error;
+          if (includeLiveData) {
+            // STEP 1a: Use portfolio data from client if already fetched; skip re-fetch
+            if (clientPortfolioData) {
+              stockData = clientPortfolioData;
+              console.log("✅ STEP 1a: Using portfolio data from client (no re-fetch)");
+            } else if (icfData?.firm_name && icfData?.client_id && icfData?.investment_banker_id) {
+              send({ type: "status", message: "Fetching portfolio data..." });
+              try {
+                stockData = await fetchCombinedCSVsByFirm(
+                  String(icfData.client_id),
+                  String(icfData.investment_banker_id),
+                  icfData.firm_name,
+                  "MASTER_PROPOSED"
+                );
+                console.log("✅ STEP 1a: Stock data fetched successfully");
+              } catch (error) {
+                console.error("❌ STEP 1a: Error fetching stock data:", error);
               }
-              
-              // Don't retry on other errors
-              throw error;
             }
 
-            return await perplexityResponse.json();
-          }, 2, 2000, 8000, [429, 500, 502, 503, 504]);
-          
-          if (responseData.success && responseData.content) {
-            perplexityData = {
-              content: responseData.content,
-              citations: responseData.citations || [],
-              citationCount: responseData.citations?.length || 0
-            };
-            console.log("✅ STEP 1b: Perplexity search completed successfully");
-            console.log(`   Found ${perplexityData.citationCount} citations`);
-          } else {
-            console.warn("⚠️ STEP 1b: Perplexity search returned no content:", responseData.error);
+            // STEP 1b: Fetch Perplexity live data — explicitly gated by the flag,
+            // with query presence as the secondary condition (nothing to search without one)
+            if (includeLiveData && extractedUserQuery.trim()) {
+              send({ type: "status", message: "Searching live market data..." });
+              try {
+                const responseData = await retryWithBackoff(async () => {
+                  const perplexityResponse = await fetch(`${baseUrl}/api/perplexity`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: extractedUserQuery }),
+                  });
+                  if (!perplexityResponse.ok) {
+                    const errorText = await perplexityResponse.text().catch(() => "Unknown error");
+                    const error: any = new Error(`Perplexity API call failed: ${perplexityResponse.status} - ${errorText}`);
+                    error.status = perplexityResponse.status;
+                    throw error;
+                  }
+                  return await perplexityResponse.json();
+                }, 2, 2000, 8000, [429, 500, 502, 503, 504]);
+
+                if (responseData.success && responseData.content) {
+                  perplexityData = {
+                    content: responseData.content,
+                    citations: responseData.citations || [],
+                    citationCount: responseData.citations?.length || 0,
+                  };
+                  console.log(`✅ STEP 1b: Perplexity search completed (${perplexityData.citationCount} citations)`);
+                } else {
+                  console.warn("⚠️ STEP 1b: Perplexity returned no content:", responseData.error);
+                }
+              } catch (error) {
+                console.error("❌ STEP 1b: Error calling Perplexity API:", error);
+              }
+            }
           }
-        } catch (error) {
-          console.error("❌ STEP 1b: Error calling Perplexity API:", error);
-          // Continue without live data if search fails
-        }
-      }
-    }
 
-    // STEP 2: Rebuild prompt with Stock Data + Perplexity response and send to Anthropic
-    if (includeLiveData && extractedUserQuery && (stockData || perplexityData)) {
-      console.log("🔧 STEP 2: Rebuilding prompt with Stock Data and Perplexity data...");
-      console.log("   Has Stock Data:", !!stockData);
-      console.log("   Has Perplexity Data:", !!perplexityData);
-      
-      // Build enhanced prompt that includes original query, stock data, and live data
-      let enhancedPrompt = `Original Query: ${extractedUserQuery}\n\n`;
-      
-      // Add stock/portfolio data if available
-      if (stockData) {
-        const stockDataSummary = typeof stockData === 'object' 
-          ? JSON.stringify(stockData, null, 2).substring(0, 3000) // Limit to 3000 chars for better data
-          : String(stockData).substring(0, 3000);
-        
-        enhancedPrompt += `---
-**STOCK/PORTFOLIO DATA (Current Holdings & Performance for ${icfData?.firm_account_name || 'Account'} at ${icfData?.firm_name || 'Firm'}):**
-${stockDataSummary}
----
-\n`;
-      }
-      
-      // Add Perplexity live data if available
-      if (perplexityData && perplexityData.content) {
-        enhancedPrompt += `---
-**LIVE DATA FROM WEB SEARCH (Latest Market Information):**
-${perplexityData.content}
+          // STEP 2: Rebuild last message with enriched context
+          if (includeLiveData && extractedUserQuery && (stockData || perplexityData)) {
+            let enhancedPrompt = `Original Query: ${extractedUserQuery}\n\n`;
 
-**Sources:** ${perplexityData.citationCount} citation(s) found
----
-\n`;
-      }
-      
-      // Build instruction section
-      const instructions = [];
-      if (stockData) {
-        instructions.push('- The current stock/portfolio data provided above');
-      }
-      if (perplexityData) {
-        instructions.push('- The latest live market data from web search');
-      }
-      if (stockData && perplexityData) {
-        instructions.push('- Combine both sources for comprehensive analysis');
-      }
-      
-      enhancedPrompt += `Please analyze the above query using:\n${instructions.join('\n')}\n\nIncorporate all available information into your analysis and visualizations.`;
+            if (stockData) {
+              const stockDataSummary = typeof stockData === 'object'
+                ? JSON.stringify(stockData, null, 2)
+                : String(stockData);
+              enhancedPrompt += `---\n**STOCK/PORTFOLIO DATA (Current Holdings & Performance for ${icfData?.firm_account_name || 'Account'} at ${icfData?.firm_name || 'Firm'}):**\n${stockDataSummary}\n---\n\n`;
+            }
 
-      // Update the last message with the enhanced prompt
-      const lastMessageIndex = anthropicMessages.length - 1;
-      
-      if (typeof anthropicMessages[lastMessageIndex].content === 'string') {
-        // Simple string content - replace with enhanced prompt
-        anthropicMessages[lastMessageIndex].content = enhancedPrompt;
-      } else if (Array.isArray(anthropicMessages[lastMessageIndex].content)) {
-        // Array content (with file data) - update the text elements
-        const contentArray = anthropicMessages[lastMessageIndex].content as any[];
-        
-        // Find or create text element
-        let textElement = contentArray.find((c: any) => c.type === 'text');
-        if (textElement) {
-          // Update existing text element with enhanced prompt
-          textElement.text = enhancedPrompt;
-        } else {
-          // Add new text element at the beginning
-          contentArray.unshift({ type: 'text', text: enhancedPrompt });
-        }
-      }
-      
-      console.log("✅ STEP 2: Enhanced prompt created and ready for Anthropic");
-    }
+            if (perplexityData?.content) {
+              enhancedPrompt += `---\n**LIVE DATA FROM WEB SEARCH (Latest Market Information):**\n${perplexityData.content}\n\n**Sources:** ${perplexityData.citationCount} citation(s) found\n---\n\n`;
+            }
 
-    console.log("🚀 Final Claude API Request:", {
-      endpoint: "messages.create",
-      model,
-      max_tokens: 4096,
-      temperature: 0.7,
-      messageCount: anthropicMessages.length,
-      tools: tools.map((t) => t.name),
-      messageStructure: JSON.stringify(
-        anthropicMessages.map((msg) => ({
-          role: msg.role,
-          content:
-            typeof msg.content === "string"
-              ? msg.content.slice(0, 50) + "..."
-              : "[Complex Content]",
-        })),
-        null,
-        2,
-      ),
-    });
+            const instructions = [
+              ...(stockData ? ['- The current stock/portfolio data provided above'] : []),
+              ...(perplexityData ? ['- The latest live market data from web search'] : []),
+              ...(stockData && perplexityData ? ['- Combine both sources for comprehensive analysis'] : []),
+            ];
+            enhancedPrompt += `Please analyze the above query using:\n${instructions.join('\n')}\n\nIncorporate all available information into your analysis and visualizations.`;
 
-    // Strong Markdown-focused system prompt
-    const systemPrompt = `You are a financial data visualization expert. Your role is to analyze financial data and create clear, meaningful visualizations using the generate_graph_data tool.
+            const lastIdx = anthropicMessages.length - 1;
+            if (typeof anthropicMessages[lastIdx].content === 'string') {
+              anthropicMessages[lastIdx].content = enhancedPrompt;
+            } else if (Array.isArray(anthropicMessages[lastIdx].content)) {
+              const contentArray = anthropicMessages[lastIdx].content as any[];
+              const textElement = contentArray.find((c: any) => c.type === 'text');
+              if (textElement) {
+                textElement.text = enhancedPrompt;
+              } else {
+                contentArray.unshift({ type: 'text', text: enhancedPrompt });
+              }
+            }
+          }
 
-OUTPUT RULES (VERY IMPORTANT):
+          // Dynamic system prompt — adapts based on what live data is available
+          const liveDataContext = includeLiveData && (stockData || perplexityData)
+            ? `\nDATA CONTEXT:\nYou have been provided with real, live data in the user's message:\n${stockData ? '- **Portfolio/Stock Data**: actual current holdings and performance figures for the client. Treat all numbers as ground truth.' : ''}\n${perplexityData ? '- **Live Web Search Data**: latest market information retrieved in real time from the web. Use it to support your analysis with current context.' : ''}\n${stockData && perplexityData ? '- Cross-reference both sources where relevant to produce a comprehensive, accurate analysis.' : ''}\nDo NOT fabricate or estimate figures — use only the data provided.\n`
+            : '';
+
+          const systemPrompt = `You are a financial data visualization expert. Your role is to analyze financial data and create clear, meaningful visualizations using the generate_graph_data tool.
+${liveDataContext}
+OUTPUT RULES:
 - Always answer in **Markdown**.
 - Use clear section headings (## Heading), short paragraphs, and bullet lists.
 - Prefer **tables** for side-by-side comparisons (allocations, top holdings, period deltas).
 - Use callouts/tips (e.g., > **Note:**) for caveats and assumptions.
-- Include concise, actionable insights and a brief “What this means” summary.
+- Include concise, actionable insights and a brief "What this means" summary.
 - When you show code/data, use fenced blocks (e.g., \`\`\`json).
-- Do NOT paste the tool’s raw JSON directly; use the tool to create charts and summarize insights in Markdown.
+- Do NOT paste the tool's raw JSON directly; use the tool to create charts and summarize insights in Markdown.
 
 CHARTING GUIDANCE:
-- Pick the most appropriate chart type (bar, multiBar, line, pie, area, stackedArea).
-- Summaries should reference the chart by name (e.g., “**Top 10 Holdings (Bar)**”).
-
-Here are the chart types available and their ideal use cases:
-
-1. LINE CHARTS ("line")
-   - Time series data showing trends
-   - Financial metrics over time
-   - Market performance tracking
-
-2. BAR CHARTS ("bar")
-   - Single metric comparisons
-   - Period-over-period analysis
-   - Category performance
-
-3. MULTI-BAR CHARTS ("multiBar")
-   - Multiple metrics comparison
-   - Side-by-side performance analysis
-   - Cross-category insights
-
-4. AREA CHARTS ("area")
-   - Volume or quantity over time
-   - Cumulative trends
-   - Market size evolution
-
-5. STACKED AREA CHARTS ("stackedArea")
-   - Component breakdowns over time
-   - Portfolio composition changes
-   - Market share evolution
-
-6. PIE CHARTS ("pie")
-   - Distribution analysis
-   - Market share breakdown
-   - Portfolio allocation
-
-When generating visualizations:
-1. Structure data correctly based on the chart type
-2. Use descriptive titles and clear descriptions
-3. Include trend information when relevant (percentage and direction)
-4. Add contextual footer notes
-5. Use proper data keys that reflect the actual metrics
+- Only use generate_graph_data when a chart meaningfully adds value over a table or text description.
+- Pick the most appropriate chart type: bar (single metric comparisons), multiBar (side-by-side metrics), line (time series trends), area (volume/cumulative over time), stackedArea (composition changes over time), pie (distribution/allocation).
+- Reference charts by name in your summary (e.g., "**Top 10 Holdings (Bar)**").
 
 Always:
-- Generate real, contextually appropriate data
-- Use proper financial formatting
-- Include relevant trends and insights
-- Structure data exactly as needed for the chosen chart type
-- Choose the most appropriate visualization for the data
-- NEVER SAY you are using the generate_graph_data tool, just execute it when needed.
+- Use proper financial formatting for numbers and percentages.
+- Structure chart data exactly as required by the chosen chart type.
+- NEVER say you are using the generate_graph_data tool — just execute it silently when needed.
+- ALWAYS call suggest_follow_ups once per response with 2-3 short questions the user might ask next. Never mention this tool.
 
 Focus on clear financial insights and let the visualization enhance understanding.`;
 
-    // Call Claude API with retry logic
-    const response = await retryWithBackoff(async () => {
-      return await anthropic.messages.create({
-        model,
-        max_tokens: 4096,
-        temperature: 0.7,
-        tools: tools,
-        tool_choice: { type: "auto" },
-        messages: anthropicMessages,
-        system: systemPrompt,
-      });
-    }, 3, 2000, 15000, [429, 500, 502, 503, 504]);
+          // STEP 3: Stream Claude response
+          send({ type: "status", message: "Analyzing..." });
 
-    // Calculate total text length from all text blocks
-    const allTextBlocks = response.content.filter((c) => c.type === "text");
-    const totalTextLength = allTextBlocks.reduce(
-      (sum: number, c: any) => sum + (c.text?.length || 0),
-      0
-    );
+          const claudeStream = anthropic.messages.stream({
+            model,
+            max_tokens: 8096,
+            temperature: 0.2,
+            tools,
+            tool_choice: { type: "auto" },
+            messages: anthropicMessages,
+            system: systemPrompt,
+          });
 
-    console.log("✅ Claude API Response received:", {
-      status: "success",
-      stopReason: response.stop_reason,
-      hasToolUse: response.content.some((c) => c.type === "tool_use"),
-      contentTypes: response.content.map((c) => c.type),
-      textBlockCount: allTextBlocks.length,
-      totalTextLength: totalTextLength,
-      toolOutput: response.content.find((c) => c.type === "tool_use")
-        ? JSON.stringify(
-            response.content.find((c) => c.type === "tool_use"),
-            null,
-            2,
-          )
-        : "No tool used",
+          // Forward text tokens to the client as they arrive
+          claudeStream.on("text", (text: string) => {
+            send({ type: "text", text });
+          });
+
+          // Wait for full completion to get tool use blocks
+          const finalMessage = await claudeStream.finalMessage();
+
+          console.log("✅ Claude stream complete:", {
+            stopReason: finalMessage.stop_reason,
+            hasToolUse: finalMessage.content.some((c) => c.type === "tool_use"),
+            contentTypes: finalMessage.content.map((c) => c.type),
+          });
+
+          const allToolUseBlocks = finalMessage.content.filter(
+            (c) => c.type === "tool_use",
+          );
+
+          // Process every generate_graph_data call — not just the first
+          const processedCharts: any[] = [];
+          for (const block of allToolUseBlocks) {
+            if ((block as any).name !== "generate_graph_data") continue;
+            try {
+              const chart = processToolResponse(block);
+              if (chart) processedCharts.push(chart);
+            } catch (error) {
+              console.error("❌ Error processing chart tool response:", error);
+            }
+          }
+
+          // Extract follow-up questions
+          const followUpsBlock = allToolUseBlocks.find(
+            (c: any) => c.name === "suggest_follow_ups",
+          ) as any | undefined;
+          const followUps: string[] = followUpsBlock?.input?.questions ?? [];
+
+          send({
+            type: "chart",
+            charts: processedCharts,
+            followUps,
+            hasToolUse: allToolUseBlocks.length > 0,
+          });
+          send({ type: "done" });
+
+          // Fire-and-forget DB persistence — never blocks the stream
+          if (conversationId) {
+            const lastMsg = messages[messages.length - 1];
+            const userContent = typeof lastMsg?.content === "string"
+              ? lastMsg.content
+              : Array.isArray(lastMsg?.content)
+              ? lastMsg.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("")
+              : "";
+
+            const assistantContent = finalMessage.content
+              .filter((c) => c.type === "text")
+              .map((c: any) => c.text)
+              .join("");
+
+            const fileMetadata = fileData
+              ? { fileName: fileData.fileName, mediaType: fileData.mediaType, isText: fileData.isText ?? false }
+              : null;
+
+            import("@/lib/prisma")
+              .then(({ prisma }) =>
+                prisma.$transaction([
+                  prisma.message.create({
+                    data: {
+                      conversationId,
+                      role: "user",
+                      content: userContent,
+                      fileMetadata: fileMetadata ?? undefined,
+                    },
+                  }),
+                  prisma.message.create({
+                    data: {
+                      conversationId,
+                      role: "assistant",
+                      content: assistantContent,
+                      chartData: processedCharts.length > 0 ? processedCharts : undefined,
+                      hasToolUse: allToolUseBlocks.length > 0,
+                    },
+                  }),
+                  prisma.conversation.update({
+                    where: { id: conversationId },
+                    data: { updatedAt: new Date() },
+                  }),
+                ])
+              )
+              .catch((err) => console.error("❌ DB persist error:", err));
+          }
+        } catch (error: any) {
+          console.error("❌ Claude stream error:", error);
+          send({
+            type: "error",
+            error: error.message || "Streaming error occurred",
+          });
+        } finally {
+          controller.close();
+        }
+      },
     });
 
-    // Collect ALL tool_use blocks (not just the first one)
-    const allToolUseBlocks = response.content.filter((c) => c.type === "tool_use");
-    // Get the first tool_use block for processing (we'll process all generate_graph_data tools)
-    const toolUseContent = allToolUseBlocks.find((c: any) => c.name === "generate_graph_data") || allToolUseBlocks[0] || null;
-    
-    // Collect ALL text content blocks (not just the first one)
-    const textContents = response.content.filter((c) => c.type === "text");
-    // Concatenate all text blocks to get the complete response
-    const fullTextContent = textContents
-      .map((c: any) => c.text || "")
-      .join("\n\n");
-
-    const processToolResponse = (toolUseContent: any) => {
-      if (!toolUseContent) return null;
-
-      const chartData = toolUseContent.input as ChartToolResponse;
-
-      // Parse data if it's a string (Claude sometimes returns JSON strings, possibly double-encoded)
-      if (chartData.data && typeof chartData.data === 'string') {
-        const originalDataString: string = chartData.data as string; // Store original string for error logging
-        try {
-          let parsed = JSON.parse(originalDataString);
-          // If the parsed result is still a string, parse it again (double-encoded JSON)
-          if (typeof parsed === 'string') {
-            parsed = JSON.parse(parsed);
-          }
-          chartData.data = parsed;
-          console.log("✅ Parsed string data to array");
-        } catch (parseError) {
-          console.error("❌ Error parsing data string:", parseError);
-          console.error("Data sample:", originalDataString.substring(0, 200));
-          throw new Error("Invalid chart data structure: data is not valid JSON");
-        }
-      }
-
-      if (
-        !chartData.chartType ||
-        !chartData.data ||
-        !Array.isArray(chartData.data)
-      ) {
-        // Store data for logging before type narrowing (use any to handle string case)
-        const dataForLogging: any = chartData.data;
-        const dataSample = typeof dataForLogging === 'string' 
-          ? dataForLogging.substring(0, 100) 
-          : dataForLogging 
-            ? JSON.stringify(dataForLogging).substring(0, 100)
-            : 'null or undefined';
-        
-        console.error("Invalid chart data structure:", {
-          hasChartType: !!chartData.chartType,
-          hasData: !!chartData.data,
-          dataType: typeof chartData.data,
-          isArray: Array.isArray(chartData.data),
-          dataSample
-        });
-        throw new Error("Invalid chart data structure");
-      }
-
-      // Transform data for pie charts to match expected structure
-      if (chartData.chartType === "pie") {
-        // Ensure data items have 'segment' and 'value' keys
-        chartData.data = chartData.data.map((item: any) => {
-          // Find the first key in chartConfig (e.g., 'sales')
-          const valueKey = Object.keys(chartData.chartConfig)[0];
-          const segmentKey = (chartData.config as any).xAxisKey || "segment";
-
-          return {
-            segment:
-              item[segmentKey] || item.segment || item.category || item.name,
-            value: (item as any)[valueKey] ?? (item as any).value,
-          };
-        });
-
-        // Ensure xAxisKey is set to 'segment' for consistency
-        (chartData.config as any).xAxisKey = "segment";
-      }
-
-      // Create new chartConfig with system color variables
-      const processedChartConfig = Object.entries(chartData.chartConfig).reduce(
-        (acc, [key, config], index) => ({
-          ...acc,
-          [key]: {
-            ...(config as Record<string, unknown>),
-            // Assign color variables sequentially
-            color: `hsl(var(--chart-${index + 1}))`,
-          },
-        }),
-        {} as Record<string, unknown>,
-      );
-
-      return {
-        ...chartData,
-        chartConfig: processedChartConfig as any,
-      };
-    };
-
-    let processedChartData = null;
-    try {
-      processedChartData = toolUseContent
-        ? processToolResponse(toolUseContent)
-        : null;
-    } catch (error) {
-      console.error("❌ Error processing tool response:", error);
-      // Continue without chart data if processing fails
-    }
-
-    // Prepare response data - only include serializable properties
-    const responseData = {
-      content: fullTextContent || "",
-      hasToolUse: response.content.some((c) => c.type === "tool_use"),
-      toolUse: toolUseContent ? {
-        type: toolUseContent.type,
-        id: toolUseContent.id,
-        name: toolUseContent.name,
-        input: toolUseContent.input,
-      } : null,
-      chartData: processedChartData,
-    };
-
-    // Ensure the response body is properly serialized with error handling
-    let responseBody: string;
-    try {
-      responseBody = JSON.stringify(responseData);
-    } catch (serializationError) {
-      console.error("❌ Error serializing response:", serializationError);
-      // Fallback response without tool data
-      responseBody = JSON.stringify({
-        content: fullTextContent || "",
-        hasToolUse: false,
-        toolUse: null,
-        chartData: null,
-        error: "Failed to serialize response data",
-      });
-    }
-
-    return new Response(responseBody, {
+    return new Response(sseStream, {
       status: 200,
       headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
       },
     });
   } catch (error) {
@@ -717,37 +594,23 @@ Focus on clear financial insights and let the visualization enhance understandin
       response: error instanceof Error ? (error as any).response : undefined,
     });
 
-    // Add specific error handling for different scenarios
-    if (error instanceof Anthropic.APIError) {
-      return new Response(
-        JSON.stringify({
-          error: "API Error",
-          details: (error as any).message,
-          code: (error as any).status,
-        }),
-        { status: (error as any).status },
-      );
-    }
-
-    if (error instanceof Anthropic.AuthenticationError) {
-      return new Response(
-        JSON.stringify({
-          error: "Authentication Error",
-          details: "Invalid API key or authentication failed",
-        }),
-        { status: 401 },
-      );
-    }
-
-    return new Response(
-      JSON.stringify({
-        error:
-          error instanceof Error ? error.message : "An unknown error occurred",
-      }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
+    const errorMessage =
+      error instanceof Error ? error.message : "An unknown error occurred";
+    const encoder = new TextEncoder();
+    const errorStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "error", error: errorMessage })}\n\n`),
+        );
+        controller.close();
       },
-    );
+    });
+    return new Response(errorStream, {
+      status: 200, // Keep 200 so the client reads the stream body
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+      },
+    });
   }
 }
