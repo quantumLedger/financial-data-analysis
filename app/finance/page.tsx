@@ -25,6 +25,9 @@ import {
 } from "lucide-react";
 import FilePreview from "@/components/FilePreview";
 import { ChartRenderer } from "@/components/ChartRenderer";
+import { DataTableRenderer } from "@/components/DataTableRenderer";
+import { MemoRenderer } from "@/components/MemoRenderer";
+import { NarrativeCard } from "@/components/NarrativeCard";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -34,7 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
-import type { ChartData } from "@/types/chart";
+import type { ChartData, TableData, MemoData, NarrativeData } from "@/types/chart";
 import TopNavBar from "@/components/TopNavBar";
 import {
   readFileAsText,
@@ -104,6 +107,9 @@ interface Message {
     isText?: boolean;
   };
   charts?: ChartData[];
+  tables?: TableData[];
+  memos?: MemoData[];
+  narratives?: NarrativeData[];
   followUps?: string[];
 }
 
@@ -388,11 +394,10 @@ export default function AIChat() {
         id: m.id,
         role: m.role,
         content: m.content,
-        charts: Array.isArray(m.chartData)
-          ? m.chartData
-          : m.chartData
-          ? [m.chartData]
-          : undefined,
+        charts: Array.isArray(m.chartData) ? m.chartData : m.chartData ? [m.chartData] : undefined,
+        tables: Array.isArray(m.tableData) ? m.tableData : undefined,
+        memos: Array.isArray(m.memoData) ? m.memoData : undefined,
+        narratives: Array.isArray(m.narrativeData) ? m.narrativeData : undefined,
         hasToolUse: m.hasToolUse ?? false,
       }));
       setMessages(loaded);
@@ -638,13 +643,20 @@ export default function AIChat() {
 
   useEffect(() => {
     const scrollToNewestChart = () => {
-      const totalCharts = messages.reduce((acc, m) => acc + (m.charts?.length ?? 0), 0);
-      if (totalCharts > 0) {
-        setCurrentChartIndex(totalCharts - 1);
-        scrollToChart(totalCharts - 1);
+      const totalItems = messages.reduce(
+        (acc, m) =>
+          acc + (m.charts?.length ?? 0) + (m.tables?.length ?? 0) +
+          (m.memos?.length ?? 0) + (m.narratives?.length ?? 0),
+        0
+      );
+      if (totalItems > 0) {
+        setCurrentChartIndex(totalItems - 1);
+        scrollToChart(totalItems - 1);
       }
     };
-    const hasAnyChart = messages.some((m) => m.charts?.length);
+    const hasAnyChart = messages.some(
+        (m) => m.charts?.length || m.tables?.length || m.memos?.length || m.narratives?.length
+      );
     if (hasAnyChart) {
       setTimeout(scrollToNewestChart, 100);
     }
@@ -784,7 +796,10 @@ export default function AIChat() {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-        let pendingStream: { charts: ChartData[]; followUps: string[]; hasToolUse: boolean } | null = null;
+        let pendingStream: {
+          charts: ChartData[]; tables: TableData[]; memos: MemoData[];
+          narratives: NarrativeData[]; followUps: string[]; hasToolUse: boolean;
+        } | null = null;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -824,6 +839,9 @@ export default function AIChat() {
             } else if (event.type === "chart") {
               pendingStream = {
                 charts: event.charts ?? [],
+                tables: event.tables ?? [],
+                memos: event.memos ?? [],
+                narratives: event.narratives ?? [],
                 followUps: event.followUps ?? [],
                 hasToolUse: !!event.hasToolUse,
               };
@@ -841,6 +859,9 @@ export default function AIChat() {
               ...out[out.length - 1],
               hasToolUse: pendingStream!.hasToolUse,
               charts: pendingStream!.charts.length > 0 ? pendingStream!.charts : undefined,
+              tables: pendingStream!.tables.length > 0 ? pendingStream!.tables : undefined,
+              memos: pendingStream!.memos.length > 0 ? pendingStream!.memos : undefined,
+              narratives: pendingStream!.narratives.length > 0 ? pendingStream!.narratives : undefined,
               followUps: pendingStream!.followUps.length > 0 ? pendingStream!.followUps : undefined,
             };
             return out;
@@ -894,10 +915,20 @@ export default function AIChat() {
       lines.push(`### ${msg.role === "user" ? "You" : "Assistant"}`);
       lines.push(msg.content);
       for (const chart of msg.charts ?? []) {
-        if (chart.config?.title) {
-          lines.push("");
-          lines.push(`_[Chart: ${chart.config.title}]_`);
+        if (chart.config?.title) { lines.push(""); lines.push(`_[Chart: ${chart.config.title}]_`); }
+      }
+      for (const table of msg.tables ?? []) {
+        if (table.title) { lines.push(""); lines.push(`_[Table: ${table.title}]_`); }
+      }
+      for (const memo of msg.memos ?? []) {
+        if (memo.title) {
+          lines.push(""); lines.push(`### ${memo.title}`);
+          lines.push(`**Executive Summary:** ${memo.executive_summary}`);
+          if (memo.recommendation) lines.push(`**Recommendation:** ${memo.recommendation}`);
         }
+      }
+      for (const n of msg.narratives ?? []) {
+        lines.push(""); lines.push(`> ${n.narrative}`);
       }
       lines.push("");
     }
@@ -1024,7 +1055,13 @@ export default function AIChat() {
     textarea.style.height = `${Math.min(textarea.scrollHeight, 300)}px`;
   };
 
-  const hasCharts = messages.some((m) => m.charts && m.charts.length > 0);
+  const hasCharts = messages.some(
+    (m) =>
+      (m.charts?.length ?? 0) > 0 ||
+      (m.tables?.length ?? 0) > 0 ||
+      (m.memos?.length ?? 0) > 0 ||
+      (m.narratives?.length ?? 0) > 0
+  );
 
   const handleInitialize = async () => {
     if (!icfObj || !proposedCsv || !portfolioJson) {
@@ -1319,19 +1356,48 @@ export default function AIChat() {
             {hasCharts ? (
               <div className="min-h-full flex flex-col">
                 {(() => {
-                  const flatCharts: { chart: ChartData; key: string }[] = [];
+                  type PanelItem =
+                    | { type: "chart"; data: ChartData; key: string }
+                    | { type: "table"; data: TableData; key: string }
+                    | { type: "memo"; data: MemoData; key: string }
+                    | { type: "narrative"; data: NarrativeData; key: string };
+
+                  const items: PanelItem[] = [];
                   messages.forEach((message, msgIdx) => {
-                    (message.charts ?? []).forEach((chart, cIdx) => {
-                      flatCharts.push({ chart, key: `chart-${msgIdx}-${cIdx}` });
-                    });
+                    (message.charts ?? []).forEach((d, i) => items.push({ type: "chart", data: d, key: `chart-${msgIdx}-${i}` }));
+                    (message.tables ?? []).forEach((d, i) => items.push({ type: "table", data: d, key: `table-${msgIdx}-${i}` }));
+                    (message.memos ?? []).forEach((d, i) => items.push({ type: "memo", data: d, key: `memo-${msgIdx}-${i}` }));
+                    (message.narratives ?? []).forEach((d, i) => items.push({ type: "narrative", data: d, key: `narrative-${msgIdx}-${i}` }));
                   });
-                  return flatCharts.map(({ chart, key }, idx) => (
+
+                  return items.map((item, idx) => (
                     <div
-                      key={key}
+                      key={item.key}
                       className="w-full min-h-full flex-shrink-0 snap-start snap-always"
-                      ref={idx === flatCharts.length - 1 ? chartEndRef : null}
+                      ref={idx === items.length - 1 ? chartEndRef : null}
                     >
-                      <SafeChartRenderer data={chart} />
+                      {item.type === "chart" && <SafeChartRenderer data={item.data} />}
+                      {item.type === "table" && (
+                        <div className="w-full h-full p-6 flex flex-col">
+                          <div className="w-[90%] mx-auto">
+                            <DataTableRenderer data={item.data} />
+                          </div>
+                        </div>
+                      )}
+                      {item.type === "memo" && (
+                        <div className="w-full h-full p-6 flex flex-col">
+                          <div className="w-[90%] flex-1 mx-auto">
+                            <MemoRenderer data={item.data} />
+                          </div>
+                        </div>
+                      )}
+                      {item.type === "narrative" && (
+                        <div className="w-full h-full p-6 flex flex-col">
+                          <div className="w-[90%] mx-auto">
+                            <NarrativeCard data={item.data} />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ));
                 })()}
@@ -1363,7 +1429,12 @@ export default function AIChat() {
 
       {hasCharts && (
         <ChartPagination
-          total={messages.reduce((acc, m) => acc + (m.charts?.length ?? 0), 0)}
+          total={messages.reduce(
+            (acc, m) =>
+              acc + (m.charts?.length ?? 0) + (m.tables?.length ?? 0) +
+              (m.memos?.length ?? 0) + (m.narratives?.length ?? 0),
+            0
+          )}
           current={currentChartIndex}
           onDotClick={scrollToChart}
         />
