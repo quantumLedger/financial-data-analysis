@@ -28,6 +28,7 @@ import { ChartRenderer } from "@/components/ChartRenderer";
 import { DataTableRenderer } from "@/components/DataTableRenderer";
 import { MemoRenderer } from "@/components/MemoRenderer";
 import { NarrativeCard } from "@/components/NarrativeCard";
+import { ReportGenerator } from "@/components/ReportGenerator";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -1142,6 +1143,11 @@ export default function AIChat() {
               </div>
 
               <div className="flex items-center gap-2">
+                <ReportGenerator
+                  messages={messages}
+                  clientName={accountName}
+                  firmName={firmName}
+                />
                 <Button
                   variant="ghost"
                   size="icon"
