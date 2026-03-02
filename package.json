@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "build": "dotenv -e .env.prod -- next build",
+    "start": "dotenv -e .env.prod -- next start",
     "lint": "next lint",
-    "postinstall": "prisma generate",
-    "db:migrate:prod": "prisma migrate deploy"
+    "postinstall": "dotenv -e .env.prod -- prisma generate",
+    "db:migrate:prod": "dotenv -e .env.prod -- prisma migrate deploy",
+    "prod": "npm run db:migrate:prod && npm run build && npm run start"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.29.0",
