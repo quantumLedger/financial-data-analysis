@@ -10,8 +10,45 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-    font-family: var(--font-montserrat), 'Montserrat', sans-serif;
+/* ── Thin scrollbars everywhere ─────────────────────────────────── */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+}
+*::-webkit-scrollbar {
+    width: 2px;
+    height: 2px;
+}
+*::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 2px;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+}
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* ── Animated gradient border (used on input box during API call) ─ */
+@keyframes gradientFlow {
+    0%   { background-position: 0%   50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0%   50%; }
+}
+
+.animate-gradient-border {
+    background: linear-gradient(
+        135deg,
+        #6366f1,
+        #8b5cf6,
+        #06b6d4,
+        #3b82f6,
+        #6366f1
+    );
+    background-size: 300% 300%;
+    animation: gradientFlow 3s ease infinite;
+    filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.45));
 }
 
 @layer utilities {

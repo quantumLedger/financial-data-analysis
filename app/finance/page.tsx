@@ -17,22 +17,20 @@ import {
   Square,
   Download,
   ChevronDown,
-  ChevronUp,
   Paperclip,
   ChartArea,
   FileInput,
   MessageCircleQuestion,
   ChartColumnBig,
-  ArrowUp,
-  ArrowDown,
-  ChevronRight,
+  Loader2,
+  FileText,
+  FileDown,
 } from "lucide-react";
 import FilePreview from "@/components/FilePreview";
 import { ChartRenderer } from "@/components/ChartRenderer";
 import { DataTableRenderer } from "@/components/DataTableRenderer";
 import { MemoRenderer } from "@/components/MemoRenderer";
 import { NarrativeCard } from "@/components/NarrativeCard";
-import { ReportGenerator } from "@/components/ReportGenerator";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -51,10 +49,6 @@ import {
 } from "@/utils/fileHandling";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChatStore } from "@/lib/stores/chatStore";
-import type { ChatMessage } from "@/lib/api/chat";
-
-type ChartMsg = ChartData;
 
 const mdComponents: Components = {
   // Headings: 16px
@@ -145,18 +139,6 @@ const models: Model[] = [
   { id: "claude-sonnet-4-5-20250929", name: "IdentifyAI's CH" },
   { id: "claude-haiku-4-5-20251001", name: "IdentifyAI's SH" },
 ];
-
-interface APIResponse {
-  content: string;
-  hasToolUse: boolean;
-  toolUse?: {
-    type: "tool_use";
-    id: string;
-    name: string;
-    input: ChartData;
-  };
-  chartData?: ChartData;
-}
 
 enum PORTFOLIO_TYPE {
   MASTER_ORIGINAL = "MASTER_ORIGINAL",
@@ -423,13 +405,9 @@ export default function AIChat() {
   const [loadingConversation, setLoadingConversation] = useState(false);
   const hasLoadedConversations = useRef(false);
   // Resizable panel state
-  const [leftPanelWidth, setLeftPanelWidth] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('leftPanelWidth');
-      return saved ? parseFloat(saved) : 33.33; // Default to 33.33% (1/3)
-    }
-    return 33.33;
-  });
+  // Always start with the SSR default so server and client HTML match.
+  // The saved preference is applied after mount to avoid hydration mismatch.
+  const [leftPanelWidth, setLeftPanelWidth] = useState(33.33);
   const [isResizing, setIsResizing] = useState(false);
 
   const loadConversation = useCallback(async (convId: string) => {
@@ -710,11 +688,15 @@ export default function AIChat() {
     }
   }, [messages]);
 
-  // Save panel width to localStorage
+  // Restore saved panel width after mount (client only — avoids SSR hydration mismatch)
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('leftPanelWidth', leftPanelWidth.toString());
-    }
+    const saved = localStorage.getItem('leftPanelWidth');
+    if (saved) setLeftPanelWidth(parseFloat(saved));
+  }, []);
+
+  // Persist panel width whenever it changes
+  useEffect(() => {
+    localStorage.setItem('leftPanelWidth', leftPanelWidth.toString());
   }, [leftPanelWidth]);
 
   // Handle resizing
@@ -944,15 +926,64 @@ export default function AIChat() {
     abortControllerRef.current?.abort();
   }, []);
 
+  // Lock textarea to single-line height while a request is in flight
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (isLoading || isUploading) {
+      el.style.height = "36px";
+      el.style.overflowY = "hidden";
+    } else {
+      el.style.overflowY = "";
+      // Restore natural height based on current content
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    }
+  }, [isLoading, isUploading]);
+
   const handleFollowUp = useCallback((question: string) => {
     setInput(question);
     textareaRef.current?.focus();
   }, []);
 
-  const exportConversation = useCallback(() => {
+  // ── Export popup ──────────────────────────────────────────────────────────
+  const [showExportPopup, setShowExportPopup] = useState(false);
+  const [exportTitle, setExportTitle] = useState("");
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+  const exportPopupRef = useRef<HTMLDivElement>(null);
+  const exportBtnRef = useRef<HTMLButtonElement>(null);
+  const exportTitleRef = useRef<HTMLInputElement>(null);
+  const [exportPopupPos, setExportPopupPos] = useState<{ top: number; right: number } | null>(null);
+
+  const allMemos = messages.flatMap((m) => m.memos ?? []);
+  const allNarratives = messages.flatMap((m) => m.narratives ?? []);
+  const allTables = messages.flatMap((m) => m.tables ?? []);
+  const allCharts = messages.flatMap((m) => m.charts ?? []);
+
+  // Default title when conversation is available
+  useEffect(() => {
+    const convTitle = conversations.find((c) => c.id === conversationId)?.title;
+    setExportTitle(convTitle ?? (accountName ? `${accountName} — Analysis` : "Conversation"));
+  }, [conversationId, conversations, accountName]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!showExportPopup) return;
+    const handler = (e: MouseEvent) => {
+      if (exportPopupRef.current && !exportPopupRef.current.contains(e.target as Node))
+        setShowExportPopup(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showExportPopup]);
+
+  useEffect(() => {
+    if (showExportPopup) setTimeout(() => exportTitleRef.current?.focus(), 50);
+  }, [showExportPopup]);
+
+  const exportMarkdown = useCallback(() => {
     if (messages.length === 0) return;
-    const title =
-      conversations.find((c) => c.id === conversationId)?.title ?? "Conversation";
+    const title = exportTitle.trim() || "Conversation";
     const lines: string[] = [
       `# ${title}`,
       `_Exported ${new Date().toLocaleString()}_`,
@@ -985,9 +1016,49 @@ export default function AIChat() {
     const a = document.createElement("a");
     a.href = url;
     a.download = `${title.replace(/[^a-z0-9]/gi, "-").toLowerCase()}-${Date.now()}.md`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [messages, conversations, conversationId]);
+    setShowExportPopup(false);
+  }, [messages, exportTitle]);
+
+  const exportPdf = useCallback(async () => {
+    if (!exportTitle.trim()) return;
+    setGeneratingPdf(true);
+    try {
+      const [{ pdf }, { ReportDocument }] = await Promise.all([
+        import("@react-pdf/renderer") as any,
+        import("@/components/ReportDocument"),
+      ]);
+      const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+      const doc = React.createElement(ReportDocument, {
+        reportTitle: exportTitle.trim(),
+        clientName: accountName,
+        firmName,
+        date,
+        memos: allMemos,
+        narratives: allNarratives,
+        tables: allTables,
+        charts: allCharts,
+      });
+      const blob = await pdf(doc).toBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${exportTitle.trim().replace(/[^a-z0-9]/gi, "-").toLowerCase()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setShowExportPopup(false);
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      toast({ title: "PDF failed", description: "Could not generate PDF. Try Markdown instead.", variant: "destructive" });
+    } finally {
+      setGeneratingPdf(false);
+    }
+  }, [exportTitle, accountName, firmName, allMemos, allNarratives, allTables, allCharts]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1010,10 +1081,8 @@ export default function AIChat() {
     };
     setMessages((prev) => [...prev, userMessage, thinkingMessage]);
     setInput("");
-    // Reset textarea height after clearing input
     if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = "44px"; // Reset to min height
+      textareaRef.current.style.height = "36px";
     }
     setIsLoading(true);
     const apiMessages = [...messages, userMessage].map((msg) => {
@@ -1177,123 +1246,9 @@ export default function AIChat() {
         }}
       />
 
-      {/* Floating Action Button (FAB) - Fixed at bottom, stays visible even in iframe */}
-      <div 
-        ref={fabRef}
-        id="chat-fab-input"
-        style={{
-          position: 'fixed',
-          bottom: '100px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: '90%',
-          maxWidth: '56rem',
-          zIndex: 99999,
-          willChange: 'transform',
-          pointerEvents: 'auto',
-          isolation: 'isolate',
-        }}
-        className="fixed bottom-[30px] left-1/2 -translate-x-1/2 w-[90%] max-w-4xl"
-      >
-        <form onSubmit={handleSubmit} className="flex flex-col">
-          {currentUpload && (
-            <div className="mb-2">
-              <FilePreview
-                file={currentUpload}
-                onRemove={() => setCurrentUpload(null)}
-              />
-            </div>
-          )}
-
-          <div className="relative bg-background/95 backdrop-blur-sm border rounded-xl shadow-2xl p-2" style={{ boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
-
-            {/* Input field with all controls inside - grows upward */}
-            <div className="relative flex items-end">
-              {/* Left separator */}
-              <div className="absolute left-0 top-0 bottom-0 w-px bg-border z-10" />
-
-              {/* File attachment button - positioned at bottom left */}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading || isUploading}
-                className="absolute left-2 z-10 hover:bg-muted"
-                style={{ bottom: '8px' }}
-              >
-                <Paperclip className="h-4 w-4" />
-              </Button>
-
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                placeholder="Ask questions, @ for context, / for commands"
-                disabled={isLoading || isUploading}
-                className="min-h-[44px] max-h-[200px] resize-none pl-12 py-3 pr-24 rounded-xl border-0 bg-transparent focus-visible:ring-0 focus-visible:border-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm overflow-y-auto"
-                rows={1}
-              />
-
-              {/* Right separator */}
-              <div className="absolute right-20 top-0 bottom-0 w-px bg-border z-10" />
-
-              {/* Live Data button - positioned at bottom right */}
-              <Button
-                type="button"
-                variant={includeLiveData ? "default" : "outline"}
-                size="sm"
-                onClick={() => setIncludeLiveData(!includeLiveData)}
-                disabled={isLoading || isUploading}
-                className={`absolute right-24 z-10 px-2 text-[10px] ${
-                  includeLiveData 
-                    ? 'bg-primary text-primary-foreground hover:bg-primary/90' 
-                    : 'border border-border hover:bg-muted'
-                }`}
-                style={{ bottom: '8px', height: '28px' }}
-              >
-                Live Data
-              </Button>
-
-              {/* Send button - positioned at bottom right */}
-              <Button
-                type="submit"
-                disabled={
-                  isLoading || isUploading || (!input.trim() && !currentUpload)
-                }
-                className="absolute right-2 z-10 rounded-full p-0 disabled:opacity-50 bg-primary hover:bg-primary/90"
-                title="Send message"
-                style={{ bottom: '8px', height: '32px', width: '32px' }}
-              >
-                {isLoading ? (
-                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-background border-t-transparent" />
-                ) : (
-                  <Send className="h-3.5 w-3.5 text-primary-foreground" />
-                )}
-              </Button>
-            </div>
-
-            {/* Status text when loading */}
-            {(isLoading || isUploading) && (
-              <div className="absolute -bottom-5 left-0 text-[10px] text-muted-foreground">
-                {isUploading ? "Processing your file..." : "Please wait while we are getting your query..."}
-              </div>
-            )}
-          </div>
-
-          <input
-            type="file"
-            ref={fileInputRef}
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-        </form>
-      </div>
-
       <div 
         ref={resizableContainerRef}
-        className="flex-1 flex bg-background mt-0 pt-0 h-[calc(100vh-4rem)] pb-32 resizable-container relative"
+        className="flex-1 flex bg-background mt-0 pt-0 h-[calc(100vh-4rem)] pb-20 resizable-container relative"
       >
         <Card 
           className="flex flex-col h-full transition-all mr-2 relative overflow-hidden"
@@ -1321,21 +1276,27 @@ export default function AIChat() {
               </div>
 
               <div className="flex items-center gap-2">
-                <ReportGenerator
-                  messages={messages}
-                  clientName={accountName}
-                  firmName={firmName}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={exportConversation}
-                  disabled={messages.length === 0 || isLoading}
-                  title="Export conversation as Markdown"
-                >
-                  <Download className="h-4 w-4" />
-                </Button>
+                {/* Single export button — popup rendered as fixed portal below */}
+                <div className="relative" ref={exportPopupRef}>
+                  <Button
+                    ref={exportBtnRef}
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => {
+                      if (exportBtnRef.current) {
+                        const r = exportBtnRef.current.getBoundingClientRect();
+                        setExportPopupPos({ top: r.bottom + 6, right: window.innerWidth - r.right });
+                      }
+                      setShowExportPopup((v) => !v);
+                    }}
+                    disabled={messages.length === 0 || isLoading}
+                    title="Export conversation"
+                  >
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </div>
+
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" className="h-8 text-[11px]">
@@ -1343,7 +1304,7 @@ export default function AIChat() {
                       <ChevronDown className="ml-2 h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent>
+                  <DropdownMenuContent className="z-[200]">
                     {models.map((model) => (
                       <DropdownMenuItem
                         key={model.id}
@@ -1380,7 +1341,7 @@ export default function AIChat() {
                       )}
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-[260px]">
+                  <DropdownMenuContent align="start" className="w-[260px] z-[200]">
                     {conversations.map((c) => (
                       <DropdownMenuItem
                         key={c.id}
@@ -1625,136 +1586,175 @@ export default function AIChat() {
 
       <form
         onSubmit={handleSubmit}
-        className={`fixed bottom-24 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl z-50 ${
-          isLoading || isUploading ? "" : "shadow-lg"
-        }`}
+        className="fixed bottom-5 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl z-50"
       >
-        <div
-          className={`relative rounded-2xl ${
-            isLoading || isUploading ? "p-[2px]" : "rounded-2xl border bg-background"
-          }`}
-        >
+        {currentUpload && (
+          <div className="mb-2 px-1">
+            <FilePreview file={currentUpload} onRemove={() => setCurrentUpload(null)} />
+          </div>
+        )}
+
+        {/* Gradient border shell — visible only while API call is in progress */}
+        <div className={`rounded-2xl transition-all ${isLoading || isUploading ? "animate-gradient-border p-[1.5px]" : ""}`}>
+        <div className={`flex items-center gap-1.5 px-2 py-1.5 bg-background rounded-2xl shadow-lg border ${isLoading || isUploading ? "border-transparent" : ""}`}>
+
+          {/* Attach */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isLoading || isUploading}
+            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+            title="Attach file"
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
+
+          {/* Textarea — readOnly while streaming, never visually disabled */}
+          <Textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              isLoading
+                ? "Generating analysis…"
+                : isUploading
+                ? "Processing file…"
+                : "Ask a question about your portfolio…"
+            }
+            readOnly={isLoading || isUploading}
+            className="flex-1 min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent shadow-none py-2 px-1 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+            rows={1}
+          />
+
+          {/* Inline status when busy */}
           {(isLoading || isUploading) && (
-            <div
-              className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden rounded-2xl"
-              aria-hidden
-            >
-              <div
-                className="h-[220%] aspect-square shrink-0 animate-spin opacity-[0.92] [animation-duration:3.2s]"
-                style={{
-                  background:
-                    "conic-gradient(from 0deg, #4285f4, #a855f7, #ec4899, #f97316, #eab308, #22c55e, #06b6d4, #4285f4)",
-                }}
-              />
+            <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60 opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary/80" />
+              </span>
+              {isUploading ? "Uploading…" : "Analyzing…"}
             </div>
           )}
 
-          <div
-            className={`relative z-[1] bg-background ${
-              isLoading || isUploading ? "rounded-[calc(1rem-2px)]" : "rounded-2xl"
-            }`}
-          >
-            {currentUpload && (
-              <div className="w-full px-3 pt-3 border-b border-border/60">
-                <FilePreview
-                  file={currentUpload}
-                  onRemove={() => setCurrentUpload(null)}
-                />
-              </div>
-            )}
+          {/* Divider */}
+          <div className="h-5 w-px bg-border shrink-0" />
 
-            <div className="flex items-end gap-2 px-2 py-2.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading || isUploading}
-                className="h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
-                title="Attach file"
-              >
-                <Paperclip className="h-5 w-5" />
-              </Button>
+          {/* Live data toggle */}
+          <div className="flex items-center gap-1 shrink-0">
+            <label
+              htmlFor="live-data-toggle"
+              className="text-[10px] text-muted-foreground cursor-pointer whitespace-nowrap"
+            >
+              Live
+            </label>
+            <Switch
+              id="live-data-toggle"
+              checked={includeLiveData}
+              onCheckedChange={setIncludeLiveData}
+              className="scale-75 origin-right"
+            />
+          </div>
 
-              <div className="flex-1 min-w-0 flex flex-col gap-1">
-                <Textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={handleInputChange}
-                  onKeyDown={handleKeyDown}
-                  placeholder={
-                    isLoading || isUploading
-                      ? isUploading
-                        ? "Processing your file…"
-                        : "Generating your financial analysis…"
-                      : "Type your message…"
-                  }
-                  disabled={isLoading || isUploading}
-                  className="min-h-[48px] max-h-[200px] resize-none py-2.5 px-3 rounded-xl border-0 bg-muted/30 shadow-none focus-visible:ring-1 focus-visible:ring-primary/40 focus-visible:ring-offset-0"
-                  rows={1}
-                />
-                {(isLoading || isUploading) && (
-                  <div className="flex items-center gap-2 px-1 text-[10px] text-muted-foreground">
-                    <span className="relative flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/50 opacity-75" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-primary/80" />
-                    </span>
-                    <span>
-                      {isUploading
-                        ? "Working on your upload…"
-                        : "Streaming analysis from the model…"}
-                    </span>
-                  </div>
-                )}
-              </div>
+          {/* Stop / Send */}
+          {isLoading ? (
+            <Button
+              type="button"
+              onClick={handleAbort}
+              size="icon"
+              className="h-8 w-8 rounded-full shrink-0 bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+              title="Stop generating"
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              size="icon"
+              disabled={isUploading || (!input.trim() && !currentUpload)}
+              className="h-8 w-8 rounded-full shrink-0"
+              title="Send"
+            >
+              <Send className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>{/* end flex row */}
+        </div>{/* end gradient border shell */}
 
-              <div className="flex flex-col items-stretch gap-2 shrink-0 self-stretch justify-end pb-0.5">
-                <div className="flex items-center gap-1.5 justify-end">
-                  <label
-                    htmlFor="live-data-toggle"
-                    className="text-[10px] text-muted-foreground cursor-pointer leading-none whitespace-nowrap"
-                  >
-                    Live data
-                  </label>
-                  <Switch
-                    id="live-data-toggle"
-                    checked={includeLiveData}
-                    onCheckedChange={setIncludeLiveData}
-                    disabled={isLoading || isUploading}
-                    className="scale-90 origin-right"
-                  />
-                </div>
-                {isLoading ? (
-                  <Button
-                    type="button"
-                    onClick={handleAbort}
-                    className="h-9 w-9 rounded-full p-0 bg-destructive hover:bg-destructive/90 text-destructive-foreground shrink-0"
-                    title="Stop generating"
-                  >
-                    <Square className="h-3.5 w-3.5 fill-current" />
-                  </Button>
-                ) : (
-                  <Button
-                    type="submit"
-                    disabled={isUploading || (!input.trim() && !currentUpload)}
-                    className="h-9 w-9 rounded-full p-0 shrink-0"
-                    title="Send"
-                  >
-                    <Send className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
+        <input
+          type="file"
+          ref={fileInputRef}
+          className="hidden"
+          onChange={handleFileSelect}
+        />
+      </form>
 
-              <input
-                type="file"
-                ref={fileInputRef}
-                className="hidden"
-                onChange={handleFileSelect}
-              />
-            </div>
+      {/* Export popup — fixed to viewport, unaffected by overflow-hidden on Card */}
+      {showExportPopup && exportPopupPos && (
+        <div
+          ref={exportPopupRef}
+          style={{ position: "fixed", top: exportPopupPos.top, right: exportPopupPos.right }}
+          className="w-72 bg-background border rounded-lg shadow-2xl p-3 z-[9999]"
+        >
+          <div className="text-[11px] font-semibold mb-0.5">Export Conversation</div>
+          <div className="text-[10px] text-muted-foreground mb-2.5">
+            {[
+              allMemos.length > 0 && `${allMemos.length} memo${allMemos.length > 1 ? "s" : ""}`,
+              allNarratives.length > 0 && `${allNarratives.length} narrative${allNarratives.length > 1 ? "s" : ""}`,
+              allTables.length > 0 && `${allTables.length} table${allTables.length > 1 ? "s" : ""}`,
+              allCharts.length > 0 && `${allCharts.length} chart${allCharts.length > 1 ? "s" : ""}`,
+              `${messages.filter((m) => m.content !== "thinking").length} messages`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+          <input
+            ref={exportTitleRef}
+            type="text"
+            value={exportTitle}
+            onChange={(e) => setExportTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setShowExportPopup(false);
+              if (e.key === "Enter" && !generatingPdf) exportMarkdown();
+            }}
+            className="w-full text-[11px] border rounded px-2 py-1.5 mb-2.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Title…"
+          />
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1 text-[11px] h-7 gap-1.5"
+              onClick={exportMarkdown}
+              disabled={generatingPdf || messages.length === 0}
+            >
+              <FileDown className="h-3 w-3" />
+              Markdown
+            </Button>
+            <Button
+              size="sm"
+              className="flex-1 text-[11px] h-7 gap-1.5 text-white"
+              onClick={exportPdf}
+              disabled={generatingPdf || !exportTitle.trim()}
+            >
+              {generatingPdf ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Generating…
+                </>
+              ) : (
+                <>
+                  <FileText className="h-3 w-3" />
+                  PDF Report
+                </>
+              )}
+            </Button>
           </div>
         </div>
-      </form>
+      )}
     </div>
   );
 }
