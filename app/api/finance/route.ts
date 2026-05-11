@@ -1,779 +1,807 @@
 // app/api/finance/route.ts
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import type { ChartData } from "@/types/chart";
-import { WEIDENTIFY_API_URL, ANTHROPIC_API_KEY, BASE_URL } from "@/lib/config";
+import type { ChartData, TableData, MemoData, NarrativeData } from "@/types/chart";
+import { retryWithBackoff } from "@/lib/retry";
 
-// Retry utility function with exponential backoff
-async function retryWithBackoff<T>(
-  fn: () => Promise<T>,
-  maxRetries: number = 3,
-  initialDelay: number = 1000,
-  maxDelay: number = 10000,
-  retryableErrors?: number[]
-): Promise<T> {
-  let lastError: Error | null = null;
-  
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (error: any) {
-      lastError = error;
-      const statusCode = error?.status || error?.response?.status || error?.statusCode;
-      
-      // Don't retry on client errors (4xx) except 429 (rate limit)
-      if (statusCode && statusCode >= 400 && statusCode < 500 && statusCode !== 429) {
-        throw error;
-      }
-      
-      // Check if error is retryable
-      if (retryableErrors && statusCode && !retryableErrors.includes(statusCode)) {
-        throw error;
-      }
-      
-      // Don't retry on last attempt
-      if (attempt === maxRetries - 1) {
-        throw error;
-      }
-      
-      // Calculate delay with exponential backoff and jitter
-      const delay = Math.min(
-        initialDelay * Math.pow(2, attempt) + Math.random() * 1000,
-        maxDelay
-      );
-      
-      console.log(`⚠️ Retry attempt ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-  
-  throw lastError || new Error("Max retries exceeded");
-}
+// ─── Portfolio data fetch ────────────────────────────────────────────────────
 
-// Portfolio data fetching function with retry
 async function fetchCombinedCSVsByFirm(
   clientId: string,
   investmentBankerId: string,
   firmName: string,
   portfolioType: "MASTER_ORIGINAL" | "MASTER_PROPOSED"
 ) {
+  const API_URL = "https://apis.weidentify.ai";
   return retryWithBackoff(async () => {
-    // Create FormData for multipart/form-data request
     const formData = new FormData();
     formData.append("investment_banker_id", investmentBankerId);
     formData.append("portfolio_type", portfolioType);
     formData.append("firm_name", firmName);
     formData.append("client_id", clientId);
-    
-    const response = await fetch(
-      `${WEIDENTIFY_API_URL}/api/fetch-csv-from-db`,
-      {
-        method: "POST",
-        body: formData,
-        // Don't set Content-Type header - browser/Node will set it with boundary
-      }
-    );
-    
+    const response = await fetch(`${API_URL}/api/fetch-combined-csvs-by-firm`, {
+      method: "POST",
+      body: formData,
+    });
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error");
       const error: any = new Error(`Failed to fetch portfolio data: ${response.status} - ${errorText}`);
       error.status = response.status;
       throw error;
     }
-    
     return await response.json();
   }, 3, 1000, 10000, [429, 500, 502, 503, 504]);
 }
 
-// Initialize Anthropic client with correct headers
-const anthropic = new Anthropic({
-  apiKey: ANTHROPIC_API_KEY!,
-});
+// ─── Anthropic client ────────────────────────────────────────────────────────
 
-export const runtime = "edge";
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+export const runtime = "nodejs";
 
-// Helper to validate base64
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 const isValidBase64 = (str: string) => {
-  try {
-    return btoa(atob(str)) === str;
-  } catch (err) {
-    return false;
-  }
+  try { return btoa(atob(str)) === str; } catch { return false; }
 };
 
-// Add Type Definitions
-interface ChartToolResponse extends ChartData {
-  // Any additional properties specific to the tool response
+// ─── finSightAI tool registry ────────────────────────────────────────────────
+
+const FINSIGHT_TOOL_NAMES = new Set([
+  "analyze_sec_filing",
+  "get_earnings_flash",
+  "find_deal_comps",
+  "generate_pitch_section",
+  "generate_pre_meeting_brief",
+  "get_morning_brief",
+  "get_portfolio_risk",
+]);
+
+function getFinsightStatusMessage(toolName: string, input: any): string {
+  switch (toolName) {
+    case "analyze_sec_filing":
+      return `Fetching ${input.filing_type ?? "10-K"} filing for ${input.ticker}...`;
+    case "get_earnings_flash":
+      return `Pulling earnings data for ${input.ticker}...`;
+    case "find_deal_comps":
+      return `Finding comparable companies for ${input.ticker}...`;
+    case "generate_pitch_section":
+      return `Drafting ${input.section_type} section...`;
+    case "generate_pre_meeting_brief":
+      return `Generating pre-meeting brief for ${input.client_name}...`;
+    case "get_morning_brief":
+      return "Fetching today's morning market brief...";
+    case "get_portfolio_risk":
+      return "Running portfolio risk analysis...";
+    default:
+      return "Fetching data...";
+  }
 }
+
+async function callFinsightAPI(toolName: string, input: any, userId: number): Promise<any> {
+  const BASE = process.env.FINSIGHT_AI_URL;
+  if (!BASE) throw new Error("FINSIGHT_AI_URL not configured");
+
+  switch (toolName) {
+    case "analyze_sec_filing": {
+      const res = await fetch(`${BASE}/api/sec-filing/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, ticker: input.ticker, filing_type: input.filing_type ?? "10-K" }),
+        signal: AbortSignal.timeout(45000),
+      });
+      if (!res.ok) throw new Error(`SEC filing API ${res.status}`);
+      return (await res.json()).data;
+    }
+
+    case "get_earnings_flash": {
+      const res = await fetch(`${BASE}/api/earnings-intelligence/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, ticker: input.ticker }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`Earnings API ${res.status}`);
+      return (await res.json()).data;
+    }
+
+    case "find_deal_comps": {
+      const res = await fetch(`${BASE}/api/deal-comps/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, target_ticker: input.ticker, search_name: input.search_name }),
+        signal: AbortSignal.timeout(45000),
+      });
+      if (!res.ok) throw new Error(`Deal comps API ${res.status}`);
+      return (await res.json()).data;
+    }
+
+    case "generate_pitch_section": {
+      const res = await fetch(`${BASE}/api/pitch-book/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          section_type: input.section_type,
+          company_name: input.company_name,
+          deal_type: input.deal_type ?? "General",
+          inputs: input.inputs ?? {},
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`Pitch book API ${res.status}`);
+      return (await res.json()).data;
+    }
+
+    case "generate_pre_meeting_brief": {
+      const res = await fetch(`${BASE}/api/pre-meeting-brief/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, ...input }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`Pre-meeting brief API ${res.status}`);
+      return (await res.json()).data;
+    }
+
+    case "get_morning_brief": {
+      const res = await fetch(`${BASE}/api/morning-brief?user_id=${userId}`, {
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!res.ok) throw new Error(`Morning brief API ${res.status}`);
+      return (await res.json()).data;
+    }
+
+    case "get_portfolio_risk": {
+      // Step 1: initiate
+      const initRes = await fetch(`${BASE}/portfolio-analysis/initiate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mapping_id: input.mapping_id }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!initRes.ok) throw new Error(`Portfolio analysis initiate ${initRes.status}`);
+
+      // Step 2: poll until complete (max 55s)
+      const deadline = Date.now() + 55000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const statusRes = await fetch(`${BASE}/portfolio-analysis/${input.mapping_id}/status`, {
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!statusRes.ok) continue;
+        const body = await statusRes.json();
+        if (body.status === "completed") return body.results;
+        if (body.status === "failed") throw new Error("Portfolio analysis failed on finSightAI");
+      }
+      throw new Error("Portfolio analysis timed out after 55s");
+    }
+
+    default:
+      throw new Error(`Unknown finSightAI tool: ${toolName}`);
+  }
+}
+
+// ─── Output tool processors ──────────────────────────────────────────────────
+
+interface ChartToolResponse extends ChartData {}
+
+function processChartBlock(block: any): ChartData | null {
+  if (!block) return null;
+  const chartData = block.input as ChartToolResponse;
+
+  if (chartData.data && typeof chartData.data === "string") {
+    try {
+      let parsed = JSON.parse(chartData.data as unknown as string);
+      if (typeof parsed === "string") parsed = JSON.parse(parsed);
+      chartData.data = parsed;
+    } catch {
+      throw new Error("Invalid chart data: data is not valid JSON");
+    }
+  }
+
+  if (!chartData.chartType || !chartData.data || !Array.isArray(chartData.data)) {
+    throw new Error("Invalid chart data structure");
+  }
+
+  if (chartData.chartType === "pie") {
+    chartData.data = chartData.data.map((item: any) => {
+      const valueKey = Object.keys(chartData.chartConfig)[0] ?? "value";
+      const segmentKey = (chartData.config as any).xAxisKey || "segment";
+      return {
+        segment: item[segmentKey] || item.segment || item.category || item.name,
+        value: item[valueKey] ?? item.value,
+      };
+    });
+    (chartData.config as any).xAxisKey = "segment";
+  }
+
+  const processedChartConfig = Object.entries(chartData.chartConfig).reduce(
+    (acc, [key, config], index) => ({
+      ...acc,
+      [key]: { ...(config as Record<string, unknown>), color: `hsl(var(--chart-${index + 1}))` },
+    }),
+    {} as Record<string, unknown>
+  );
+
+  return { ...chartData, chartConfig: processedChartConfig as any };
+}
+
+function processTableBlock(block: any): TableData | null {
+  const input = block.input;
+  if (!input?.title || !input?.columns || !input?.rows) return null;
+  return {
+    title: input.title,
+    description: input.description,
+    columns: input.columns,
+    rows: input.rows,
+    footer: input.footer,
+  };
+}
+
+function processMemoBlock(block: any): MemoData | null {
+  const input = block.input;
+  if (!input?.title || !input?.executive_summary) return null;
+  return {
+    title: input.title,
+    company: input.company,
+    date: input.date,
+    executive_summary: input.executive_summary,
+    analysis: input.analysis ?? "",
+    risks: Array.isArray(input.risks) ? input.risks : [],
+    recommendation: input.recommendation ?? "",
+  };
+}
+
+function processNarrativeBlock(block: any): NarrativeData | null {
+  const input = block.input;
+  if (!input?.narrative) return null;
+  return { narrative: input.narrative, tone: input.tone ?? "formal" };
+}
+
+// ─── Tool definitions ─────────────────────────────────────────────────────────
 
 interface ToolSchema {
   name: string;
   description: string;
-  input_schema: {
-    type: "object";
-    properties: Record<string, unknown>;
-    required: string[];
-  };
+  input_schema: { type: "object"; properties: Record<string, unknown>; required: string[] };
 }
 
 const tools: ToolSchema[] = [
+  // ── Suggest follow-ups (output) ──────────────────────────────────────────
+  {
+    name: "suggest_follow_ups",
+    description: "Suggest 2-3 short follow-up questions the user might naturally want to ask next.",
+    input_schema: {
+      type: "object",
+      properties: {
+        questions: { type: "array", items: { type: "string" }, description: "2-3 concise follow-up questions" },
+      },
+      required: ["questions"],
+    },
+  },
+
+  // ── Chart (output) ────────────────────────────────────────────────────────
   {
     name: "generate_graph_data",
-    description:
-      "Generate structured JSON data for creating financial charts and graphs.",
+    description: "Generate structured JSON data for creating financial charts and graphs.",
     input_schema: {
-      type: "object" as const,
+      type: "object",
       properties: {
-        chartType: {
-          type: "string" as const,
-          enum: ["bar", "multiBar", "line", "pie", "area", "stackedArea"] as const,
-          description: "The type of chart to generate",
-        },
+        chartType: { type: "string", enum: ["bar", "multiBar", "line", "pie", "area", "stackedArea"] },
         config: {
-          type: "object" as const,
+          type: "object",
           properties: {
-            title: { type: "string" as const },
-            description: { type: "string" as const },
-            trend: {
-              type: "object" as const,
-              properties: {
-                percentage: { type: "number" as const },
-                direction: {
-                  type: "string" as const,
-                  enum: ["up", "down"] as const,
-                },
-              },
-              required: ["percentage", "direction"],
-            },
-            footer: { type: "string" as const },
-            totalLabel: { type: "string" as const },
-            xAxisKey: { type: "string" as const },
+            title: { type: "string" }, description: { type: "string" },
+            trend: { type: "object", properties: { percentage: { type: "number" }, direction: { type: "string", enum: ["up", "down"] } }, required: ["percentage", "direction"] },
+            footer: { type: "string" }, totalLabel: { type: "string" }, xAxisKey: { type: "string" },
           },
           required: ["title", "description"],
         },
-        data: {
-          type: "array" as const,
-          items: {
-            type: "object" as const,
-            additionalProperties: true, // Allow any structure
-          },
-        },
-        chartConfig: {
-          type: "object" as const,
-          additionalProperties: {
-            type: "object" as const,
-            properties: {
-              label: { type: "string" as const },
-              stacked: { type: "boolean" as const },
-            },
-            required: ["label"],
-          },
-        },
+        data: { type: "array", items: { type: "object", additionalProperties: true } },
+        chartConfig: { type: "object", additionalProperties: { type: "object", properties: { label: { type: "string" }, stacked: { type: "boolean" } }, required: ["label"] } },
       },
       required: ["chartType", "config", "data", "chartConfig"],
     },
   },
+
+  // ── Data table (output) ───────────────────────────────────────────────────
+  {
+    name: "generate_data_table",
+    description: "Generate a structured financial data table with formatted columns. Use when tabular comparison is clearer than a chart.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        description: { type: "string" },
+        columns: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              key: { type: "string" },
+              label: { type: "string" },
+              type: { type: "string", enum: ["text", "number", "percent", "currency", "badge"] },
+              align: { type: "string", enum: ["left", "right", "center"] },
+            },
+            required: ["key", "label", "type"],
+          },
+        },
+        rows: { type: "array", items: { type: "object", additionalProperties: true } },
+        footer: { type: "string" },
+      },
+      required: ["title", "columns", "rows"],
+    },
+  },
+
+  // ── Investment memo (output) ──────────────────────────────────────────────
+  {
+    name: "generate_investment_memo",
+    description: "Structure findings into a formal IB investment memo: Executive Summary, Analysis, Risks, Recommendation. Call this when the user asks for a memo, report, or formal write-up.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        company: { type: "string" },
+        date: { type: "string" },
+        executive_summary: { type: "string", description: "2-3 sentence executive summary" },
+        analysis: { type: "string", description: "Detailed analysis in markdown" },
+        risks: { type: "array", items: { type: "string" }, description: "Key risk factors (3-5 bullets)" },
+        recommendation: { type: "string", description: "Clear recommendation with rationale" },
+      },
+      required: ["title", "executive_summary", "analysis", "risks", "recommendation"],
+    },
+  },
+
+  // ── Client narrative (output) ─────────────────────────────────────────────
+  {
+    name: "generate_client_narrative",
+    description: "Generate a plain-language paragraph ready to copy-paste into a client email or deck slide. No jargon. Call this when the user asks for something to send to a client.",
+    input_schema: {
+      type: "object",
+      properties: {
+        narrative: { type: "string", description: "Complete plain-language narrative, copy-paste ready" },
+        tone: { type: "string", enum: ["formal", "conversational", "executive"] },
+      },
+      required: ["narrative"],
+    },
+  },
+
+  // ── finSightAI research tools ─────────────────────────────────────────────
+  {
+    name: "analyze_sec_filing",
+    description: "Fetch and AI-analyze the latest SEC filing (10-K, 10-Q, 8-K) for any US public company. Use when asked about financials, risks, or regulatory filings.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "US stock ticker e.g. AAPL, MSFT" },
+        filing_type: { type: "string", enum: ["10-K", "10-Q", "8-K"] },
+      },
+      required: ["ticker", "filing_type"],
+    },
+  },
+  {
+    name: "get_earnings_flash",
+    description: "Get an AI earnings flash note — EPS actual vs estimate, revenue, beat/miss verdict, management tone, margins, and forward guidance.",
+    input_schema: {
+      type: "object",
+      properties: { ticker: { type: "string" } },
+      required: ["ticker"],
+    },
+  },
+  {
+    name: "find_deal_comps",
+    description: "Find public comparable companies for a target ticker. Returns EV/EBITDA, P/E, EV/Revenue, gross margin, and revenue growth for up to 10 peers.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "Target company ticker" },
+        search_name: { type: "string", description: "Optional label for this search" },
+      },
+      required: ["ticker"],
+    },
+  },
+  {
+    name: "generate_pitch_section",
+    description: "Generate an IB-grade pitch book section in markdown. Valid sections: Executive Summary, Investment Thesis, Company Overview, Market Analysis, Financial Overview, Transaction Overview, Risk Factors.",
+    input_schema: {
+      type: "object",
+      properties: {
+        section_type: { type: "string" },
+        company_name: { type: "string" },
+        deal_type: { type: "string", enum: ["M&A", "IPO", "Secondary", "Debt", "Restructuring", "General"] },
+        inputs: { type: "object", additionalProperties: { type: "string" } },
+      },
+      required: ["section_type", "company_name", "deal_type", "inputs"],
+    },
+  },
+  {
+    name: "generate_pre_meeting_brief",
+    description: "Generate a meeting prep document with talking points, agenda, and live ticker moves for client holdings.",
+    input_schema: {
+      type: "object",
+      properties: {
+        client_name: { type: "string" },
+        meeting_type: { type: "string" },
+        meeting_date: { type: "string", description: "YYYY-MM-DD" },
+        context_notes: { type: "string" },
+        portfolio_snapshot: { type: "string" },
+        recent_interactions: { type: "string" },
+      },
+      required: ["client_name"],
+    },
+  },
+  {
+    name: "get_morning_brief",
+    description: "Get today's pre-generated morning market brief — index snapshot, watchlist movers, earnings today, top news, AI narrative.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_portfolio_risk",
+    description: "Run quantitative portfolio risk analysis — VaR, Sharpe ratio, volatility, benchmark comparison, rebalancing suggestions.",
+    input_schema: {
+      type: "object",
+      properties: { mapping_id: { type: "string", description: "Portfolio mapping ID from ICF" } },
+      required: ["mapping_id"],
+    },
+  },
 ];
+
+// ─── POST handler ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, fileData, model, includeLiveData, icfMapping } = await req.json();
-    
-    // Extract icfMapping for use in live data fetching
+    const {
+      messages, fileData, model, includeLiveData,
+      icfMapping, portfolioData: clientPortfolioData, conversationId,
+    } = await req.json();
+
     const icfData = icfMapping || null;
+    const finsightUserId = parseInt(String(icfData?.investment_banker_id ?? process.env.FINSIGHT_DEFAULT_USER_ID ?? "1"), 10) || 1;
 
-    console.log("🔍 Initial Request Data:", {
-      hasMessages: !!messages,
-      messageCount: messages?.length,
-      hasFileData: !!fileData,
-      fileType: fileData?.mediaType,
-      model,
-    });
-
-    // Input validation
     if (!messages || !Array.isArray(messages)) {
-      return new Response(
-        JSON.stringify({ error: "Messages array is required" }),
-        { status: 400 },
-      );
+      return new Response(JSON.stringify({ error: "Messages array is required" }), { status: 400 });
     }
-
     if (!model) {
-      return new Response(
-        JSON.stringify({ error: "Model selection is required" }),
-        { status: 400 },
-      );
+      return new Response(JSON.stringify({ error: "Model selection is required" }), { status: 400 });
     }
 
-    // Convert all previous messages
-    let anthropicMessages = messages.map((msg: any) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
+    // Build Anthropic messages
+    let anthropicMessages = messages.map((msg: any) => ({ role: msg.role, content: msg.content }));
 
-    // Handle file in the latest message
+    // Inject file into last message
     if (fileData) {
       const { base64, mediaType, isText } = fileData;
-
-      if (!base64) {
-        console.error("❌ No base64 data received");
-        return new Response(JSON.stringify({ error: "No file data" }), {
-          status: 400,
-        });
-      }
+      if (!base64) return new Response(JSON.stringify({ error: "No file data" }), { status: 400 });
 
       try {
         if (isText) {
-          // Decode base64 text content
           const textContent = decodeURIComponent(escape(atob(base64)));
-
-          // Replace only the last message with the file content
           anthropicMessages[anthropicMessages.length - 1] = {
             role: "user",
             content: [
-              {
-                type: "text",
-                text: `File contents of ${fileData.fileName}:\n\n${textContent}`,
-              },
-              {
-                type: "text",
-                text: messages[messages.length - 1].content,
-              },
+              { type: "text", text: `File contents of ${fileData.fileName}:\n\n${textContent}` },
+              { type: "text", text: messages[messages.length - 1].content },
             ],
           };
         } else if (mediaType.startsWith("image/")) {
-          // Handle image files
           anthropicMessages[anthropicMessages.length - 1] = {
             role: "user",
             content: [
-              {
-                type: "image",
-                source: {
-                  type: "base64",
-                  media_type: mediaType,
-                  data: base64,
-                },
-              },
-              {
-                type: "text",
-                text: messages[messages.length - 1].content,
-              },
+              { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+              { type: "text", text: messages[messages.length - 1].content },
             ],
           };
         }
-      } catch (error) {
-        console.error("Error processing file content:", error);
-        return new Response(
-          JSON.stringify({ error: "Failed to process file content" }),
-          { status: 400 },
-        );
+      } catch {
+        return new Response(JSON.stringify({ error: "Failed to process file content" }), { status: 400 });
       }
     }
 
-    // STEP 1: If includeLiveData is true, fetch stock data and Perplexity data
-    let stockData = null;
-    let perplexityData = null;
-    let extractedUserQuery = '';
-    
-    if (includeLiveData) {
-      // STEP 1a: Fetch stock/portfolio data using firmName and accountName
-      if (icfData && icfData.firm_name && icfData.client_id && icfData.investment_banker_id) {
-        try {
-          console.log("📊 STEP 1a: Fetching stock/portfolio data from API...");
-          console.log("Firm:", icfData.firm_name, "Account:", icfData.firm_account_name);
-          
-          stockData = await fetchCombinedCSVsByFirm(
-            String(icfData.client_id),
-            String(icfData.investment_banker_id),
-            icfData.firm_name,
-            "MASTER_PROPOSED"
-          );
-          
-          console.log("✅ STEP 1a: Stock data fetched successfully");
-          console.log("   Data keys:", Object.keys(stockData || {}));
-        } catch (error) {
-          console.error("❌ STEP 1a: Error fetching stock data:", error);
-          // Continue without stock data if fetch fails
-        }
-      } else {
-        console.warn("⚠️ STEP 1a: Missing icfMapping data (firm_name, client_id, or investment_banker_id)");
-      }
+    // Extract user query for Perplexity
+    let extractedUserQuery = "";
+    const lastMsg = messages[messages.length - 1];
+    if (typeof lastMsg?.content === "string") {
+      extractedUserQuery = lastMsg.content;
+    } else if (Array.isArray(lastMsg?.content)) {
+      extractedUserQuery = lastMsg.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join(" ");
     }
-    
-    // STEP 1b: Fetch Perplexity live data if includeLiveData is true and we have a query
-    if (includeLiveData && messages.length > 0) {
-      const lastUserMessage = messages[messages.length - 1];
-      
-      // Extract user query from the last message
-      if (typeof lastUserMessage.content === 'string') {
-        extractedUserQuery = lastUserMessage.content;
-      } else if (Array.isArray(lastUserMessage.content)) {
-        // Extract text from content array
-        const textContent = lastUserMessage.content
-          .filter((c: any) => c.type === 'text')
-          .map((c: any) => c.text)
-          .join(' ');
-        extractedUserQuery = textContent;
-      }
 
-      if (extractedUserQuery.trim()) {
+    const protocol = req.headers.get("x-forwarded-proto") || "http";
+    const host = req.headers.get("host") || "localhost:3000";
+    const baseUrl = `${protocol}://${host}`;
+
+    // ── SSE Stream ──────────────────────────────────────────────────────────
+    const encoder = new TextEncoder();
+    const sseStream = new ReadableStream({
+      async start(controller) {
+        const send = (data: object) =>
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+
         try {
-          console.log("🔍 STEP 1b: Fetching latest data from Perplexity API...");
-          console.log("Query:", extractedUserQuery.substring(0, 100) + "...");
-          
-          // Construct base URL from request
-          const protocol = req.headers.get('x-forwarded-proto') || (BASE_URL.startsWith('https') ? 'https' : 'http');
-          const host = req.headers.get('host') || new URL(BASE_URL).host;
-          const baseUrl = `${protocol}://${host}`;
-          
-          // Call Perplexity API with retry (the Perplexity route has its own retry logic, but we add one more layer)
-          const responseData = await retryWithBackoff(async () => {
-            const perplexityResponse = await fetch(
-              `${baseUrl}/api/perplexity`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: extractedUserQuery }),
-              }
-            );
+          // ── Step 1: Live data (portfolio + Perplexity) ─────────────────
+          let stockData: any = null;
+          let perplexityData: any = null;
 
-            if (!perplexityResponse.ok) {
-              const errorText = await perplexityResponse.text().catch(() => "Unknown error");
-              const error: any = new Error(`Perplexity API call failed: ${perplexityResponse.status} - ${errorText}`);
-              error.status = perplexityResponse.status;
-              
-              // Retry on 429 and 5xx errors
-              if (perplexityResponse.status === 429 || perplexityResponse.status >= 500) {
-                throw error;
-              }
-              
-              // Don't retry on other errors
-              throw error;
+          if (includeLiveData) {
+            if (clientPortfolioData) {
+              stockData = clientPortfolioData;
+            } else if (icfData?.firm_name && icfData?.client_id && icfData?.investment_banker_id) {
+              send({ type: "status", message: "Fetching portfolio data..." });
+              try {
+                stockData = await fetchCombinedCSVsByFirm(
+                  String(icfData.client_id), String(icfData.investment_banker_id),
+                  icfData.firm_name, "MASTER_PROPOSED"
+                );
+              } catch (e) { console.error("❌ Portfolio fetch error:", e); }
             }
 
-            return await perplexityResponse.json();
-          }, 2, 2000, 8000, [429, 500, 502, 503, 504]);
-          
-          if (responseData.success && responseData.content) {
-            perplexityData = {
-              content: responseData.content,
-              citations: responseData.citations || [],
-              citationCount: responseData.citations?.length || 0
-            };
-            console.log("✅ STEP 1b: Perplexity search completed successfully");
-            console.log(`   Found ${perplexityData.citationCount} citations`);
-          } else {
-            console.warn("⚠️ STEP 1b: Perplexity search returned no content:", responseData.error);
+            if (extractedUserQuery.trim()) {
+              send({ type: "status", message: "Searching live market data..." });
+              try {
+                const pd = await retryWithBackoff(async () => {
+                  const r = await fetch(`${baseUrl}/api/perplexity`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ query: extractedUserQuery }),
+                  });
+                  if (!r.ok) { const e: any = new Error(`Perplexity ${r.status}`); e.status = r.status; throw e; }
+                  return r.json();
+                }, 2, 2000, 8000, [429, 500, 502, 503, 504]);
+
+                if (pd.success && pd.content) {
+                  perplexityData = { content: pd.content, citations: pd.citations || [], citationCount: pd.citations?.length || 0 };
+                }
+              } catch (e) { console.error("❌ Perplexity error:", e); }
+            }
           }
-        } catch (error) {
-          console.error("❌ STEP 1b: Error calling Perplexity API:", error);
-          // Continue without live data if search fails
+
+          // ── Step 2: Enrich last message ────────────────────────────────
+          if (includeLiveData && extractedUserQuery && (stockData || perplexityData)) {
+            let enhanced = `Original Query: ${extractedUserQuery}\n\n`;
+            if (stockData) {
+              enhanced += `---\n**PORTFOLIO DATA (${icfData?.firm_account_name || "Account"} at ${icfData?.firm_name || "Firm"}):**\n${JSON.stringify(stockData, null, 2)}\n---\n\n`;
+            }
+            if (perplexityData?.content) {
+              enhanced += `---\n**LIVE MARKET DATA:**\n${perplexityData.content}\n\n**Sources:** ${perplexityData.citationCount} citation(s)\n---\n\n`;
+            }
+            const instructions = [
+              ...(stockData ? ["- The current portfolio data provided above"] : []),
+              ...(perplexityData ? ["- The latest live market data from web search"] : []),
+            ];
+            enhanced += `Please analyze using:\n${instructions.join("\n")}\n\nIncorporate all available information.`;
+
+            const lastIdx = anthropicMessages.length - 1;
+            if (typeof anthropicMessages[lastIdx].content === "string") {
+              anthropicMessages[lastIdx].content = enhanced;
+            } else if (Array.isArray(anthropicMessages[lastIdx].content)) {
+              const arr = anthropicMessages[lastIdx].content as any[];
+              const t = arr.find((c: any) => c.type === "text");
+              if (t) t.text = enhanced; else arr.unshift({ type: "text", text: enhanced });
+            }
+          }
+
+          // ── Step 3: System prompt ──────────────────────────────────────
+          const liveCtx = includeLiveData && (stockData || perplexityData)
+            ? `\nDATA CONTEXT:\nYou have real live data in the user's message:\n${stockData ? "- Portfolio/Stock Data: actual current holdings." : ""}\n${perplexityData ? "- Live Web Search Data: latest market information." : ""}\nDo NOT fabricate figures — use only the data provided.\n`
+            : "";
+
+          const systemPrompt = `You are a senior financial analyst and investment banking research assistant. You help bankers research companies, analyze portfolios, and generate professional client deliverables.
+${liveCtx}
+RESEARCH CAPABILITIES — call these tools silently when relevant:
+- analyze_sec_filing: for company financials, risks, or regulatory questions
+- get_earnings_flash: for earnings performance, beat/miss, guidance
+- find_deal_comps: for comparable company multiples and peer benchmarking
+- generate_pitch_section: for IB pitch book sections
+- generate_pre_meeting_brief: for client meeting preparation
+- get_morning_brief: for today's market context
+- get_portfolio_risk: for quantitative risk metrics on a portfolio
+
+OUTPUT TOOLS — call these to produce structured deliverables:
+- generate_graph_data: when a chart adds value over text (bar, line, pie, area, multiBar, stackedArea)
+- generate_data_table: when tabular comparison is clearer than a chart (comps tables, allocations, metrics)
+- generate_investment_memo: when the user asks for a memo, report, or formal write-up
+- generate_client_narrative: when the user wants something to send to a client (email-ready paragraph)
+- suggest_follow_ups: ALWAYS call once per response with 2-3 follow-up questions. Never mention this.
+
+OUTPUT FORMAT:
+- Always respond in Markdown with clear section headings, bullet lists, and tables where useful
+- Reference charts/tables by title in your analysis
+- Use proper financial formatting (numbers, percentages)
+- NEVER say you are using any tool — execute silently
+- For memos and narratives, still provide a brief markdown summary in the text response
+
+Focus on clear, actionable financial insights.`;
+
+          // ── Step 4: Multi-round agentic loop ───────────────────────────
+          send({ type: "status", message: "Analyzing..." });
+
+          let currentMessages: any[] = anthropicMessages;
+          let finalMessage: any = null;
+          let roundCount = 0;
+          const MAX_ROUNDS = 4;
+
+          while (roundCount < MAX_ROUNDS) {
+            roundCount++;
+
+            const claudeStream = anthropic.messages.stream({
+              model,
+              max_tokens: 8096,
+              temperature: 0.2,
+              tools: tools as any,
+              tool_choice: { type: "auto" },
+              messages: currentMessages as any,
+              system: systemPrompt,
+            });
+
+            claudeStream.on("text", (text: string) => send({ type: "text", text }));
+            const message = await claudeStream.finalMessage();
+
+            const toolBlocks = message.content.filter((c) => c.type === "tool_use") as any[];
+            const hasFinsightCalls = toolBlocks.some((b) => FINSIGHT_TOOL_NAMES.has(b.name));
+
+            // If no finSightAI calls needed — this is the final round
+            if (message.stop_reason !== "tool_use" || !hasFinsightCalls) {
+              finalMessage = message;
+              break;
+            }
+
+            // Execute all tool calls (finSightAI in parallel)
+            send({ type: "status", message: getFinsightStatusMessage(toolBlocks.find((b) => FINSIGHT_TOOL_NAMES.has(b.name))?.name ?? "", toolBlocks[0]?.input ?? {}) });
+
+            const toolResults = await Promise.all(
+              toolBlocks.map(async (block: any) => {
+                if (!FINSIGHT_TOOL_NAMES.has(block.name)) {
+                  // Output tool called mid-loop — return placeholder so Claude continues
+                  return { type: "tool_result", tool_use_id: block.id, content: "{}" };
+                }
+                try {
+                  const result = await callFinsightAPI(block.name, block.input, finsightUserId);
+                  return { type: "tool_result", tool_use_id: block.id, content: JSON.stringify(result) };
+                } catch (err: any) {
+                  console.error(`❌ finSightAI tool ${block.name} error:`, err.message);
+                  return {
+                    type: "tool_result",
+                    tool_use_id: block.id,
+                    content: JSON.stringify({ error: err.message || "Tool call failed" }),
+                    is_error: true,
+                  };
+                }
+              })
+            );
+
+            currentMessages = [
+              ...currentMessages,
+              { role: "assistant", content: message.content },
+              { role: "user", content: toolResults },
+            ] as any;
+          }
+
+          if (!finalMessage) {
+            throw new Error("Agent loop exceeded max rounds without producing a final response");
+          }
+
+          console.log("✅ Claude complete:", {
+            rounds: roundCount,
+            stopReason: finalMessage.stop_reason,
+            contentTypes: (finalMessage.content as any[]).map((c: any) => c.type),
+          });
+
+          // ── Step 5: Process output tool blocks ─────────────────────────
+          const allOutputBlocks = (finalMessage.content as any[]).filter((c: any) => c.type === "tool_use") as any[];
+
+          const processedCharts: ChartData[] = [];
+          const processedTables: TableData[] = [];
+          const processedMemos: MemoData[] = [];
+          const processedNarratives: NarrativeData[] = [];
+
+          for (const block of allOutputBlocks) {
+            try {
+              if (block.name === "generate_graph_data") {
+                const chart = processChartBlock(block);
+                if (chart) processedCharts.push(chart);
+              } else if (block.name === "generate_data_table") {
+                const table = processTableBlock(block);
+                if (table) processedTables.push(table);
+              } else if (block.name === "generate_investment_memo") {
+                const memo = processMemoBlock(block);
+                if (memo) processedMemos.push(memo);
+              } else if (block.name === "generate_client_narrative") {
+                const narrative = processNarrativeBlock(block);
+                if (narrative) processedNarratives.push(narrative);
+              }
+            } catch (err) {
+              console.error(`❌ Output tool processing error (${block.name}):`, err);
+            }
+          }
+
+          const followUpsBlock = allOutputBlocks.find((b) => b.name === "suggest_follow_ups");
+          const followUps: string[] = followUpsBlock?.input?.questions ?? [];
+
+          send({
+            type: "chart",
+            charts: processedCharts,
+            tables: processedTables,
+            memos: processedMemos,
+            narratives: processedNarratives,
+            followUps,
+            hasToolUse: allOutputBlocks.length > 0,
+          });
+          send({ type: "done" });
+
+          // ── Step 6: Fire-and-forget DB persistence ─────────────────────
+          if (conversationId) {
+            const userContent = typeof lastMsg?.content === "string"
+              ? lastMsg.content
+              : Array.isArray(lastMsg?.content)
+              ? lastMsg.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("")
+              : "";
+
+            const assistantContent = (finalMessage.content as any[])
+              .filter((c: any) => c.type === "text")
+              .map((c: any) => c.text)
+              .join("");
+
+            const fileMetadata = fileData
+              ? { fileName: fileData.fileName, mediaType: fileData.mediaType, isText: fileData.isText ?? false }
+              : null;
+
+            import("@/lib/prisma")
+              .then(({ prisma }) =>
+                prisma.$transaction([
+                  prisma.message.create({
+                    data: {
+                      conversationId,
+                      role: "user",
+                      content: userContent,
+                      fileMetadata: fileMetadata ?? undefined,
+                    },
+                  }),
+                  prisma.message.create({
+                    data: {
+                      conversationId,
+                      role: "assistant",
+                      content: assistantContent,
+                      chartData: processedCharts.length > 0 ? (processedCharts as any) : undefined,
+                      tableData: processedTables.length > 0 ? (processedTables as any) : undefined,
+                      memoData: processedMemos.length > 0 ? (processedMemos as any) : undefined,
+                      narrativeData: processedNarratives.length > 0 ? (processedNarratives as any) : undefined,
+                      hasToolUse: allOutputBlocks.length > 0,
+                    },
+                  }),
+                  prisma.conversation.update({
+                    where: { id: conversationId },
+                    data: { updatedAt: new Date() },
+                  }),
+                ])
+              )
+              .catch((err) => console.error("❌ DB persist error:", err));
+          }
+        } catch (error: any) {
+          console.error("❌ Stream error:", error);
+          send({ type: "error", error: error.message || "Streaming error occurred" });
+        } finally {
+          controller.close();
         }
-      }
-    }
-
-    // STEP 2: Rebuild prompt with Stock Data + Perplexity response and send to Anthropic
-    if (includeLiveData && extractedUserQuery && (stockData || perplexityData)) {
-      console.log("🔧 STEP 2: Rebuilding prompt with Stock Data and Perplexity data...");
-      console.log("   Has Stock Data:", !!stockData);
-      console.log("   Has Perplexity Data:", !!perplexityData);
-      
-      // Build enhanced prompt that includes original query, stock data, and live data
-      let enhancedPrompt = `Original Query: ${extractedUserQuery}\n\n`;
-      
-      // Add stock/portfolio data if available
-      if (stockData) {
-        const stockDataSummary = typeof stockData === 'object' 
-          ? JSON.stringify(stockData, null, 2).substring(0, 3000) // Limit to 3000 chars for better data
-          : String(stockData).substring(0, 3000);
-        
-        enhancedPrompt += `---
-**STOCK/PORTFOLIO DATA (Current Holdings & Performance for ${icfData?.firm_account_name || 'Account'} at ${icfData?.firm_name || 'Firm'}):**
-${stockDataSummary}
----
-\n`;
-      }
-      
-      // Add Perplexity live data if available
-      if (perplexityData && perplexityData.content) {
-        enhancedPrompt += `---
-**LIVE DATA FROM WEB SEARCH (Latest Market Information):**
-${perplexityData.content}
-
-**Sources:** ${perplexityData.citationCount} citation(s) found
----
-\n`;
-      }
-      
-      // Build instruction section
-      const instructions = [];
-      if (stockData) {
-        instructions.push('- The current stock/portfolio data provided above');
-      }
-      if (perplexityData) {
-        instructions.push('- The latest live market data from web search');
-      }
-      if (stockData && perplexityData) {
-        instructions.push('- Combine both sources for comprehensive analysis');
-      }
-      
-      enhancedPrompt += `Please analyze the above query using:\n${instructions.join('\n')}\n\nIncorporate all available information into your analysis and visualizations.`;
-
-      // Update the last message with the enhanced prompt
-      const lastMessageIndex = anthropicMessages.length - 1;
-      
-      if (typeof anthropicMessages[lastMessageIndex].content === 'string') {
-        // Simple string content - replace with enhanced prompt
-        anthropicMessages[lastMessageIndex].content = enhancedPrompt;
-      } else if (Array.isArray(anthropicMessages[lastMessageIndex].content)) {
-        // Array content (with file data) - update the text elements
-        const contentArray = anthropicMessages[lastMessageIndex].content as any[];
-        
-        // Find or create text element
-        let textElement = contentArray.find((c: any) => c.type === 'text');
-        if (textElement) {
-          // Update existing text element with enhanced prompt
-          textElement.text = enhancedPrompt;
-        } else {
-          // Add new text element at the beginning
-          contentArray.unshift({ type: 'text', text: enhancedPrompt });
-        }
-      }
-      
-      console.log("✅ STEP 2: Enhanced prompt created and ready for Anthropic");
-    }
-
-    console.log("🚀 Final Claude API Request:", {
-      endpoint: "messages.create",
-      model,
-      max_tokens: 4096,
-      temperature: 0.7,
-      messageCount: anthropicMessages.length,
-      tools: tools.map((t) => t.name),
-      messageStructure: JSON.stringify(
-        anthropicMessages.map((msg) => ({
-          role: msg.role,
-          content:
-            typeof msg.content === "string"
-              ? msg.content.slice(0, 50) + "..."
-              : "[Complex Content]",
-        })),
-        null,
-        2,
-      ),
-    });
-
-    // Strong Markdown-focused system prompt
-    const systemPrompt = `You are a financial data visualization expert. Your role is to analyze financial data and create clear, meaningful visualizations using the generate_graph_data tool.
-
-OUTPUT RULES (VERY IMPORTANT):
-- Always answer in **Markdown**.
-- Use clear section headings (## Heading), short paragraphs, and bullet lists.
-- Prefer **tables** for side-by-side comparisons (allocations, top holdings, period deltas).
-- Use callouts/tips (e.g., > **Note:**) for caveats and assumptions.
-- Include concise, actionable insights and a brief “What this means” summary.
-- When you show code/data, use fenced blocks (e.g., \`\`\`json).
-- Do NOT paste the tool’s raw JSON directly; use the tool to create charts and summarize insights in Markdown.
-
-CHARTING GUIDANCE:
-- Pick the most appropriate chart type (bar, multiBar, line, pie, area, stackedArea).
-- Summaries should reference the chart by name (e.g., “**Top 10 Holdings (Bar)**”).
-
-Here are the chart types available and their ideal use cases:
-
-1. LINE CHARTS ("line")
-   - Time series data showing trends
-   - Financial metrics over time
-   - Market performance tracking
-
-2. BAR CHARTS ("bar")
-   - Single metric comparisons
-   - Period-over-period analysis
-   - Category performance
-
-3. MULTI-BAR CHARTS ("multiBar")
-   - Multiple metrics comparison
-   - Side-by-side performance analysis
-   - Cross-category insights
-
-4. AREA CHARTS ("area")
-   - Volume or quantity over time
-   - Cumulative trends
-   - Market size evolution
-
-5. STACKED AREA CHARTS ("stackedArea")
-   - Component breakdowns over time
-   - Portfolio composition changes
-   - Market share evolution
-
-6. PIE CHARTS ("pie")
-   - Distribution analysis
-   - Market share breakdown
-   - Portfolio allocation
-
-When generating visualizations:
-1. Structure data correctly based on the chart type
-2. Use descriptive titles and clear descriptions
-3. Include trend information when relevant (percentage and direction)
-4. Add contextual footer notes
-5. Use proper data keys that reflect the actual metrics
-
-Always:
-- Generate real, contextually appropriate data
-- Use proper financial formatting
-- Include relevant trends and insights
-- Structure data exactly as needed for the chosen chart type
-- Choose the most appropriate visualization for the data
-- NEVER SAY you are using the generate_graph_data tool, just execute it when needed.
-
-Focus on clear financial insights and let the visualization enhance understanding.`;
-
-    // Call Claude API with retry logic
-    const response = await retryWithBackoff(async () => {
-      return await anthropic.messages.create({
-        model,
-        max_tokens: 4096,
-        temperature: 0.7,
-        tools: tools,
-        tool_choice: { type: "auto" },
-        messages: anthropicMessages,
-        system: systemPrompt,
+        },
       });
-    }, 3, 2000, 15000, [429, 500, 502, 503, 504]);
 
-    // Calculate total text length from all text blocks
-    const allTextBlocks = response.content.filter((c) => c.type === "text");
-    const totalTextLength = allTextBlocks.reduce(
-      (sum: number, c: any) => sum + (c.text?.length || 0),
-      0
-    );
-
-    console.log("✅ Claude API Response received:", {
-      status: "success",
-      stopReason: response.stop_reason,
-      hasToolUse: response.content.some((c) => c.type === "tool_use"),
-      contentTypes: response.content.map((c) => c.type),
-      textBlockCount: allTextBlocks.length,
-      totalTextLength: totalTextLength,
-      toolOutput: response.content.find((c) => c.type === "tool_use")
-        ? JSON.stringify(
-            response.content.find((c) => c.type === "tool_use"),
-            null,
-            2,
-          )
-        : "No tool used",
-    });
-
-    // Collect ALL tool_use blocks (not just the first one)
-    const allToolUseBlocks = response.content.filter((c) => c.type === "tool_use");
-    // Get the first tool_use block for processing (we'll process all generate_graph_data tools)
-    const toolUseContent = allToolUseBlocks.find((c: any) => c.name === "generate_graph_data") || allToolUseBlocks[0] || null;
-    
-    // Collect ALL text content blocks (not just the first one)
-    const textContents = response.content.filter((c) => c.type === "text");
-    // Concatenate all text blocks to get the complete response
-    const fullTextContent = textContents
-      .map((c: any) => c.text || "")
-      .join("\n\n");
-
-    const processToolResponse = (toolUseContent: any) => {
-      if (!toolUseContent) return null;
-
-      const chartData = toolUseContent.input as ChartToolResponse;
-
-      // Parse data if it's a string (Claude sometimes returns JSON strings, possibly double-encoded)
-      if (chartData.data && typeof chartData.data === 'string') {
-        const originalDataString: string = chartData.data as string; // Store original string for error logging
-        try {
-          let parsed = JSON.parse(originalDataString);
-          // If the parsed result is still a string, parse it again (double-encoded JSON)
-          if (typeof parsed === 'string') {
-            parsed = JSON.parse(parsed);
-          }
-          chartData.data = parsed;
-          console.log("✅ Parsed string data to array");
-        } catch (parseError) {
-          console.error("❌ Error parsing data string:", parseError);
-          console.error("Data sample:", originalDataString.substring(0, 200));
-          throw new Error("Invalid chart data structure: data is not valid JSON");
-        }
-      }
-
-      // Ensure data is an array
-      if (!chartData.data) {
-        console.error("Chart data is missing");
-        throw new Error("Invalid chart data structure: data is missing");
-      }
-
-      // Convert to array if it's not already
-      if (!Array.isArray(chartData.data)) {
-        console.warn("Chart data is not an array, attempting to convert:", typeof chartData.data);
-        
-        // Try to convert object to array
-        if (typeof chartData.data === 'object' && chartData.data !== null) {
-          // If it's an object with numeric keys or array-like, convert it
-          const obj = chartData.data as any;
-          if (Object.keys(obj).length > 0) {
-            // Try to convert object to array of values
-            chartData.data = Object.entries(obj).map(([key, value]) => ({
-              [key]: value,
-              ...(typeof value === 'object' ? value : {})
-            }));
-            console.log("✅ Converted object to array");
-          } else {
-            chartData.data = [];
-          }
-        } else {
-          console.error("Cannot convert chart data to array");
-          throw new Error("Invalid chart data structure: data must be an array or object");
-        }
-      }
-
-      if (!chartData.chartType || chartData.data.length === 0) {
-        // Store data for logging
-        const dataForLogging: any = chartData.data;
-        const dataSample = typeof dataForLogging === 'string' 
-          ? dataForLogging.substring(0, 100) 
-          : dataForLogging 
-            ? JSON.stringify(dataForLogging).substring(0, 100)
-            : 'null or undefined';
-        
-        console.error("Invalid chart data structure:", {
-          hasChartType: !!chartData.chartType,
-          hasData: !!chartData.data,
-          dataLength: Array.isArray(chartData.data) ? chartData.data.length : 'not array',
-          dataType: typeof chartData.data,
-          isArray: Array.isArray(chartData.data),
-          dataSample
-        });
-        throw new Error("Invalid chart data structure: missing chartType or empty data");
-      }
-
-      // Transform data for pie charts to match expected structure
-      if (chartData.chartType === "pie") {
-        // Ensure data items have 'segment' and 'value' keys
-        chartData.data = chartData.data.map((item: any) => {
-          // Find the first key in chartConfig (e.g., 'sales')
-          const valueKey = Object.keys(chartData.chartConfig)[0];
-          const segmentKey = (chartData.config as any).xAxisKey || "segment";
-
-          return {
-            segment:
-              item[segmentKey] || item.segment || item.category || item.name,
-            value: (item as any)[valueKey] ?? (item as any).value,
-          };
-        });
-
-        // Ensure xAxisKey is set to 'segment' for consistency
-        (chartData.config as any).xAxisKey = "segment";
-      }
-
-      // Create new chartConfig with system color variables
-      const processedChartConfig = Object.entries(chartData.chartConfig).reduce(
-        (acc, [key, config], index) => ({
-          ...acc,
-          [key]: {
-            ...(config as Record<string, unknown>),
-            // Assign color variables sequentially
-            color: `hsl(var(--chart-${index + 1}))`,
-          },
-        }),
-        {} as Record<string, unknown>,
-      );
-
-      return {
-        ...chartData,
-        chartConfig: processedChartConfig as any,
-      };
-    };
-
-    let processedChartData = null;
-    try {
-      processedChartData = toolUseContent
-        ? processToolResponse(toolUseContent)
-        : null;
-    } catch (error) {
-      console.error("❌ Error processing tool response:", error);
-      // Continue without chart data if processing fails
-    }
-
-    // Prepare response data - only include serializable properties
-    const responseData = {
-      content: fullTextContent || "",
-      hasToolUse: response.content.some((c) => c.type === "tool_use"),
-      toolUse: toolUseContent ? {
-        type: toolUseContent.type,
-        id: toolUseContent.id,
-        name: toolUseContent.name,
-        input: toolUseContent.input,
-      } : null,
-      chartData: processedChartData,
-    };
-
-    // Ensure the response body is properly serialized with error handling
-    let responseBody: string;
-    try {
-      responseBody = JSON.stringify(responseData);
-    } catch (serializationError) {
-      console.error("❌ Error serializing response:", serializationError);
-      // Fallback response without tool data
-      responseBody = JSON.stringify({
-        content: fullTextContent || "",
-        hasToolUse: false,
-        toolUse: null,
-        chartData: null,
-        error: "Failed to serialize response data",
-      });
-    }
-
-    return new Response(responseBody, {
+    return new Response(sseStream, {
       status: 200,
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-      },
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" },
     });
   } catch (error) {
-    console.error("❌ Finance API Error: ", error);
-    console.error("Full error details:", {
-      name: error instanceof Error ? error.name : "Unknown",
-      message: error instanceof Error ? error.message : "Unknown error",
-      stack: error instanceof Error ? error.stack : undefined,
-      headers: error instanceof Error ? (error as any).headers : undefined,
-      response: error instanceof Error ? (error as any).response : undefined,
-    });
-
-    // Add specific error handling for different scenarios
-    if (error instanceof Anthropic.APIError) {
-      return new Response(
-        JSON.stringify({
-          error: "API Error",
-          details: (error as any).message,
-          code: (error as any).status,
-        }),
-        { status: (error as any).status },
-      );
-    }
-
-    if (error instanceof Anthropic.AuthenticationError) {
-      return new Response(
-        JSON.stringify({
-          error: "Authentication Error",
-          details: "Invalid API key or authentication failed",
-        }),
-        { status: 401 },
-      );
-    }
-
-    return new Response(
-      JSON.stringify({
-        error:
-          error instanceof Error ? error.message : "An unknown error occurred",
-      }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
+    console.error("❌ Finance API Error:", error);
+    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
+    const encoder = new TextEncoder();
+    const errorStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", error: errorMessage })}\n\n`));
+        controller.close();
       },
-    );
+    });
+    return new Response(errorStream, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+    });
   }
 }

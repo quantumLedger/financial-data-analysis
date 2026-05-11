@@ -1,6 +1,7 @@
 // app/api/perplexity/route.ts
 import { NextRequest } from "next/server";
 import { PERPLEXITY_API_KEY } from "@/lib/config";
+import { retryWithBackoff } from "@/lib/retry";
 
 // Use Node.js runtime for better API compatibility
 export const runtime = "nodejs";
@@ -60,46 +61,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Retry utility function with exponential backoff
-    const retryWithBackoff = async <T>(
-      fn: () => Promise<T>,
-      maxRetries: number = 3,
-      initialDelay: number = 1000,
-      maxDelay: number = 10000
-    ): Promise<T> => {
-      let lastError: Error | null = null;
-      
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-          return await fn();
-        } catch (error: any) {
-          lastError = error;
-          const statusCode = error?.status;
-          
-          // Don't retry on client errors (4xx) except 429 (rate limit)
-          if (statusCode && statusCode >= 400 && statusCode < 500 && statusCode !== 429) {
-            throw error;
-          }
-          
-          // Don't retry on last attempt
-          if (attempt === maxRetries - 1) {
-            throw error;
-          }
-          
-          // Calculate delay with exponential backoff and jitter
-          const delay = Math.min(
-            initialDelay * Math.pow(2, attempt) + Math.random() * 1000,
-            maxDelay
-          );
-          
-          console.log(`⚠️ Perplexity API retry attempt ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-      
-      throw lastError || new Error("Max retries exceeded");
-    };
-
     // Call Perplexity API with retry
     console.log("Calling Perplexity API with query:", query.substring(0, 50) + "...");
     
@@ -120,7 +81,7 @@ export async function POST(req: NextRequest) {
                 content: query,
               },
             ],
-            max_tokens: 1024,
+            max_tokens: 4096,
             temperature: 0.0,
           }),
         });

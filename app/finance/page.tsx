@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +14,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Send,
+  Square,
+  Download,
   ChevronDown,
   ChevronUp,
   Paperclip,
@@ -27,6 +29,10 @@ import {
 } from "lucide-react";
 import FilePreview from "@/components/FilePreview";
 import { ChartRenderer } from "@/components/ChartRenderer";
+import { DataTableRenderer } from "@/components/DataTableRenderer";
+import { MemoRenderer } from "@/components/MemoRenderer";
+import { NarrativeCard } from "@/components/NarrativeCard";
+import { ReportGenerator } from "@/components/ReportGenerator";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -35,7 +41,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { ChartData } from "@/types/chart";
+import { Switch } from "@/components/ui/switch";
+import type { ChartData, TableData, MemoData, NarrativeData } from "@/types/chart";
 import TopNavBar from "@/components/TopNavBar";
 import {
   readFileAsText,
@@ -98,6 +105,7 @@ interface Message {
   id: string;
   role: string;
   content: string;
+  status?: string; // pre-stream status shown with spinner before first token
   hasToolUse?: boolean;
   file?: {
     base64: string;
@@ -105,7 +113,19 @@ interface Message {
     mediaType: string;
     isText?: boolean;
   };
-  chartData?: ChartMsg | null;
+  charts?: ChartData[];
+  tables?: TableData[];
+  memos?: MemoData[];
+  narratives?: NarrativeData[];
+  followUps?: string[];
+}
+
+interface ConversationSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  _count: { messages: number };
 }
 
 type Model = {
@@ -123,7 +143,7 @@ interface FileUpload {
 
 const models: Model[] = [
   { id: "claude-sonnet-4-5-20250929", name: "IdentifyAI's CH" },
-  { id: "claude-sonnet-4-5-20250929", name: "IdentifyAI's SH" },
+  { id: "claude-haiku-4-5-20251001", name: "IdentifyAI's SH" },
 ];
 
 interface APIResponse {
@@ -226,55 +246,24 @@ const MessageComponent: React.FC<MessageComponentProps & {
           message.role === "user" ? "max-w-[75%] ml-auto" : "w-full"
         }`}
       >
-        {shouldShowCollapse && (
-          <button
-            onClick={onToggleCollapse}
-            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground mb-1 transition-colors"
-          >
-            {isCollapsed ? (
-              <>
-                <ChevronRight className="w-3 h-3" />
-                <span>Show message</span>
-              </>
-            ) : (
-              <>
-                <ChevronDown className="w-3 h-3" />
-                <span>Hide message</span>
-              </>
-            )}
-          </button>
-        )}
-        {(!shouldShowCollapse || !isCollapsed) && (
-          <div
-            className={`p-3 rounded-md text-[12px] ${
-              message.role === "user"
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted border"
-            }`}
-            ref={contentRef}
-          >
-            {message.content === "thinking" ? (
-              <div className="flex items-center">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900 mr-2" />
-                <span>Thinking...</span>
-              </div>
-            ) : (
-              <>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                  {displayContent}
-                </ReactMarkdown>
-                {isLongContent && (
-                  <button
-                    onClick={() => setIsExpanded(!isExpanded)}
-                    className="mt-2 text-[10px] text-muted-foreground hover:text-foreground underline"
-                  >
-                    {isExpanded ? 'Show less' : 'Show more'}
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        )}
+        <div
+          className={`p-3 rounded-md text-[12px] ${
+            message.role === "user"
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted border"
+          }`}
+        >
+          {message.content === "thinking" ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-current flex-shrink-0" />
+              <span className="text-[11px]">{message.status ?? "Thinking..."}</span>
+            </div>
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+              {message.content}
+            </ReactMarkdown>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -329,6 +318,18 @@ const DEFAULT_ICF_MAPPING = {
   pdf_url: "identify.ai/investment_banker_11/client_id_35/firm_ROTHSCHILD/00099-pages-4-5-2026-01-15-16-29.pdf",
   report_id: "d9cebd7f-ed25-4fd6-b4d4-ce83b1850192"
 };
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
 
 export default function AIChat() {
   const [icfObj, setIcfObj] = useState<any | null>(null);
@@ -402,6 +403,7 @@ export default function AIChat() {
   const chartEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [currentUpload, setCurrentUpload] = useState<FileUpload | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [currentChartIndex, setCurrentChartIndex] = useState(0);
@@ -413,48 +415,13 @@ export default function AIChat() {
   const [portfolioJson, setPortfolioJson] = useState<any | null>(null);
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
-  
-  // Chat store for persistence
-  const [chatStore, setChatStore] = useState<ChatStore | null>(null);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const fabRef = useRef<HTMLDivElement>(null);
-  
-  // Expanded messages state (messages that are explicitly expanded, old messages are collapsed by default)
-  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
-  const [showJumpButtons, setShowJumpButtons] = useState(false);
+  const hasAutoInitialized = useRef(false);
 
-  // Ensure FAB stays fixed even when scrolling or in iframe
-  useEffect(() => {
-    const fabElement = fabRef.current;
-    if (!fabElement) return;
-
-    // Force fixed positioning
-    const ensureFixed = () => {
-      fabElement.style.position = 'fixed';
-      fabElement.style.bottom = '100px';
-      fabElement.style.left = '50%';
-      fabElement.style.transform = 'translateX(-50%)';
-      fabElement.style.zIndex = '99999';
-    };
-
-    ensureFixed();
-    
-    // Re-apply on scroll to ensure it stays fixed
-    const handleScroll = () => {
-      ensureFixed();
-    };
-
-    window.addEventListener('scroll', handleScroll, true);
-    document.addEventListener('scroll', handleScroll, true);
-
-    return () => {
-      window.removeEventListener('scroll', handleScroll, true);
-      document.removeEventListener('scroll', handleScroll, true);
-    };
-  }, []);
-  
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [showConversationList, setShowConversationList] = useState(false);
+  const [loadingConversation, setLoadingConversation] = useState(false);
+  const hasLoadedConversations = useRef(false);
   // Resizable panel state
   const [leftPanelWidth, setLeftPanelWidth] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -465,81 +432,106 @@ export default function AIChat() {
   });
   const [isResizing, setIsResizing] = useState(false);
 
-  // Initialize chat store when ICF mapping is available
-  useEffect(() => {
-    // Normalize ICF object first (extract icfMapping if it exists, otherwise use as-is)
-    const rawIcfObj = icfObj || DEFAULT_ICF_MAPPING;
-    const normalizedIcfObj = normalizeIcf(rawIcfObj) || rawIcfObj;
-    const currentIcfObj = normalizedIcfObj;
-    
-    // After normalization, the id should be directly on the object
-    const mappingId = currentIcfObj?.id || null;
-    const firmNameForChat = currentIcfObj?.firm_name || null;
-    const firmAccountNameForChat = currentIcfObj?.firm_account_name || null;
-    
-    // Clear messages immediately when switching ICF to prevent showing old data
-    setMessages([]);
-    setLoadingHistory(true);
-    
-    // Create a flag to track if this effect is still active
-    let isActive = true;
-    
-    const store = new ChatStore(
-      'FINANCE',
-      mappingId,
-      firmNameForChat,
-      firmAccountNameForChat
-    );
-    setChatStore(store);
-    
-    // Load historical messages
-    store.initialize().then(() => {
-      if (!isActive) return;
-      
-      const chatMessages = store.getMessages();
-      const convertedMessages: Message[] = chatMessages.map((msg: ChatMessage) => ({
-        id: msg.id,
-        role: msg.role,
-        content: msg.content,
-        hasToolUse: msg.hasToolUse,
-        file: msg.file && msg.hasFile ? msg.file : undefined,
-        chartData: msg.chartData || null,
+  const loadConversation = useCallback(async (convId: string) => {
+    setLoadingConversation(true);
+    try {
+      const res = await fetch(`/api/conversations/${convId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const loaded: Message[] = data.messages.map((m: any) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        charts: Array.isArray(m.chartData) ? m.chartData : m.chartData ? [m.chartData] : undefined,
+        tables: Array.isArray(m.tableData) ? m.tableData : undefined,
+        memos: Array.isArray(m.memoData) ? m.memoData : undefined,
+        narratives: Array.isArray(m.narrativeData) ? m.narrativeData : undefined,
+        hasToolUse: m.hasToolUse ?? false,
       }));
-      
-      setMessages(convertedMessages);
-      setLoadingHistory(false);
-    }).catch((error) => {
-      if (!isActive) return;
-      console.error('[ERROR] Failed to load chat history:', error);
-      setLoadingHistory(false);
-      setMessages([]);
-    });
-    
-    // Subscribe to store updates
-    const unsubscribe = store.subscribe(() => {
-      if (!isActive) return;
-      
-      const chatMessages = store.getMessages();
-      const convertedMessages: Message[] = chatMessages.map((msg: ChatMessage) => ({
-        id: msg.id,
-        role: msg.role,
-        content: msg.content,
-        hasToolUse: msg.hasToolUse,
-        file: msg.file && msg.hasFile ? msg.file : undefined,
-        chartData: msg.chartData || null,
-      }));
-      
-      setMessages(convertedMessages);
-    });
-    
-    return () => {
-      isActive = false;
-      unsubscribe();
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
+      setMessages(loaded);
+      setConversationId(convId);
+      hasAutoInitialized.current = true;
+    } catch (err) {
+      console.error("❌ loadConversation error:", err);
+    } finally {
+      setLoadingConversation(false);
+    }
+  }, []);
+
+  const ensureConversation = useCallback(async (firstUserContent: string): Promise<string | null> => {
+    if (conversationId) return conversationId;
+    try {
+      const res = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: clientId || "anonymous",
+          bankerId: bankerId || "anonymous",
+          firmName,
+          accountName,
+          title: firstUserContent.startsWith("Initialize memory")
+            ? `Portfolio Analysis · ${new Date().toLocaleDateString()}`
+            : firstUserContent.slice(0, 60) || "New Conversation",
+        }),
+      });
+      if (!res.ok) return null;
+      const conv = await res.json();
+      setConversationId(conv.id);
+      setConversations((prev) => [{ ...conv, _count: { messages: 0 } }, ...prev]);
+      return conv.id;
+    } catch (err) {
+      console.error("❌ ensureConversation error:", err);
+      return null;
+    }
+  }, [conversationId, clientId, bankerId, firmName, accountName]);
+
+  const initializePromptDisplay = `Initialize memory and analyze data for ${accountName} at ${firmName}. (details hidden)`;
+
+  const initializePromptHidden = useMemo(() => {
+    const payload = {
+      firmName,
+      accountName,
+      proposedCsv,
+      pdfUrl,
+      icfMapping: icfObj,
+      portfolioData: portfolioJson,
+      mappingDetails: {
+        csv_url_master: icfObj?.csv_url_master,
+        csv_url_proposed: icfObj?.csv_url_proposed,
+        excel_ai_history_proposed: icfObj?.excel_ai_history_proposed,
+        excel_ai_history_master: icfObj?.excel_ai_history_master,
+        portfolio_s3_key: icfObj?.portfolio_s3_key,
+        report_s3_key: icfObj?.report_s3_key,
+        available_liquid_cash: icfObj?.available_liquid_cash,
+        portfolio_status: icfObj?.portfolio_status,
+        report_id: icfObj?.report_id,
+        id: icfObj?.id,
+        investment_banker_id: icfObj?.investment_banker_id,
+        client_id: icfObj?.client_id,
+      },
     };
-  }, [icfObj]);
+    const lines: string[] = [];
+    lines.push(`Initialize portfolio memory and analysis context for firm "${firmName}" and account "${accountName}".`);
+    lines.push(`Always use the PROPOSED portfolio CSV.`);
+    lines.push(`You are given a JSON payload containing combined portfolio data under "portfolioData". Ingest and normalize it.`);
+    if (icfObj?.available_liquid_cash) {
+      lines.push(`Available liquid cash: $${icfObj.available_liquid_cash.toLocaleString()}`);
+    }
+    if (icfObj?.portfolio_status) {
+      lines.push(`Portfolio status: ${icfObj.portfolio_status}`);
+    }
+    lines.push(`Tasks:`);
+    lines.push(`1) Summarize top holdings by weight and total value, and cash percentage.`);
+    lines.push(`2) Build sector allocation and market-cap buckets.`);
+    lines.push(`3) Produce three charts:`);
+    lines.push(`   - Bar: Top 10 holdings by weight`);
+    lines.push(`   - Pie: Sector allocation`);
+    lines.push(`   - Area or Line: Portfolio value over time (if series present), else bar by asset class`);
+    lines.push(`Return a concise summary and chart configs JSON for rendering.`);
+    lines.push(`DATA JSON:`);
+    lines.push(JSON.stringify(payload));
+    return lines.join("\n");
+  }, [firmName, accountName, proposedCsv, pdfUrl, icfObj, portfolioJson]);
 
   useEffect(() => {
     async function loadOnce() {
@@ -565,6 +557,96 @@ export default function AIChat() {
     loadOnce();
   }, [clientId, bankerId, firmName, portfolioJson]);
 
+
+  // Load prior conversations once icfObj is resolved
+  useEffect(() => {
+    if (!icfObj || !clientId || !bankerId) return;
+    if (hasLoadedConversations.current) return;
+    hasLoadedConversations.current = true;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/conversations?clientId=${clientId}&bankerId=${bankerId}`);
+        if (!res.ok) return;
+        const convList: ConversationSummary[] = await res.json();
+        setConversations(convList);
+        if (convList.length > 0) {
+          await loadConversation(convList[0].id);
+        }
+      } catch (err) {
+        console.error("❌ bootstrap conversations error:", err);
+      }
+    })();
+  }, [icfObj, clientId, bankerId, loadConversation]);
+
+  // Auto-initialize chat when all data is ready
+  useEffect(() => {
+    // Only auto-initialize once per session and when all required data is available
+    if (
+      hasAutoInitialized.current ||
+      !icfObj ||
+      !proposedCsv ||
+      !portfolioJson ||
+      loadingPortfolio ||
+      isLoading ||
+      messages.length > 0 // Don't auto-initialize if there are already messages
+    ) {
+      return;
+    }
+
+    // Mark as initialized to prevent multiple calls
+    hasAutoInitialized.current = true;
+    
+    // Trigger initialization automatically
+    const autoInit = async () => {
+      const userMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: initializePromptDisplay,
+      };
+      const thinkingMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "thinking",
+      };
+      setMessages([userMsg, thinkingMsg]);
+      setIsLoading(true);
+      const msgs = [{ role: "user", content: initializePromptHidden }];
+      const convId = await ensureConversation(initializePromptDisplay);
+      const body = {
+        messages: msgs,
+        model: selectedModel,
+        icfMapping: icfObj,
+        includeLiveData,
+        portfolioData: portfolioJson ?? undefined,
+        conversationId: convId,
+      };
+      try {
+        await callFinanceStream(body);
+      } catch (error) {
+        console.error("Auto-initialization failed:", error);
+        setMessages((prev) => {
+          const out = [...prev];
+          out[out.length - 1] = {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "Initialization failed. Please try again.",
+          };
+          return out;
+        });
+        hasAutoInitialized.current = false;
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    // Small delay to ensure UI is ready
+    const timer = setTimeout(() => {
+      autoInit();
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [icfObj, proposedCsv, portfolioJson, loadingPortfolio, isLoading, messages.length, selectedModel, firmName, accountName, pdfUrl, includeLiveData, initializePromptHidden, initializePromptDisplay, ensureConversation]);
 
   useEffect(() => {
     const scrollToBottom = () => {
@@ -609,14 +691,21 @@ export default function AIChat() {
 
   useEffect(() => {
     const scrollToNewestChart = () => {
-      const chartsCount = messages.filter((m) => m.chartData).length;
-      if (chartsCount > 0) {
-        setCurrentChartIndex(chartsCount - 1);
-        scrollToChart(chartsCount - 1);
+      const totalItems = messages.reduce(
+        (acc, m) =>
+          acc + (m.charts?.length ?? 0) + (m.tables?.length ?? 0) +
+          (m.memos?.length ?? 0) + (m.narratives?.length ?? 0),
+        0
+      );
+      if (totalItems > 0) {
+        setCurrentChartIndex(totalItems - 1);
+        scrollToChart(totalItems - 1);
       }
     };
-    const lastChartIndex = messages.findLastIndex((m) => m.chartData);
-    if (lastChartIndex !== -1) {
+    const hasAnyChart = messages.some(
+        (m) => m.charts?.length || m.tables?.length || m.memos?.length || m.narratives?.length
+      );
+    if (hasAnyChart) {
       setTimeout(scrollToNewestChart, 100);
     }
   }, [messages]);
@@ -736,6 +825,170 @@ export default function AIChat() {
     }
   };
 
+  // Shared SSE stream consumer — updates the last message in real-time
+  const callFinanceStream = useCallback(
+    async (requestBody: object) => {
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        const res = await fetch("/api/finance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal,
+        });
+
+        if (!res.ok || !res.body) throw new Error(String(res.status));
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let pendingStream: {
+          charts: ChartData[]; tables: TableData[]; memos: MemoData[];
+          narratives: NarrativeData[]; followUps: string[]; hasToolUse: boolean;
+        } | null = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+
+          for (const part of parts) {
+            if (!part.startsWith("data: ")) continue;
+            let event: any;
+            try {
+              event = JSON.parse(part.slice(6));
+            } catch {
+              continue;
+            }
+
+            if (event.type === "status") {
+              setMessages((prev) => {
+                const out = [...prev];
+                out[out.length - 1] = { ...out[out.length - 1], status: event.message };
+                return out;
+              });
+            } else if (event.type === "text") {
+              setMessages((prev) => {
+                const out = [...prev];
+                const last = out[out.length - 1];
+                out[out.length - 1] = {
+                  ...last,
+                  status: undefined,
+                  content:
+                    last.content === "thinking" ? event.text : last.content + event.text,
+                };
+                return out;
+              });
+            } else if (event.type === "chart") {
+              pendingStream = {
+                charts: event.charts ?? [],
+                tables: event.tables ?? [],
+                memos: event.memos ?? [],
+                narratives: event.narratives ?? [],
+                followUps: event.followUps ?? [],
+                hasToolUse: !!event.hasToolUse,
+              };
+            } else if (event.type === "error") {
+              throw new Error(event.error || "Streaming error");
+            }
+          }
+        }
+
+        // Apply charts and follow-ups after stream ends
+        if (pendingStream) {
+          setMessages((prev) => {
+            const out = [...prev];
+            out[out.length - 1] = {
+              ...out[out.length - 1],
+              hasToolUse: pendingStream!.hasToolUse,
+              charts: pendingStream!.charts.length > 0 ? pendingStream!.charts : undefined,
+              tables: pendingStream!.tables.length > 0 ? pendingStream!.tables : undefined,
+              memos: pendingStream!.memos.length > 0 ? pendingStream!.memos : undefined,
+              narratives: pendingStream!.narratives.length > 0 ? pendingStream!.narratives : undefined,
+              followUps: pendingStream!.followUps.length > 0 ? pendingStream!.followUps : undefined,
+            };
+            return out;
+          });
+        }
+      } catch (err: any) {
+        if (err.name === "AbortError") {
+          // Finalize any partial/thinking message so the UI isn't stuck
+          setMessages((prev) => {
+            const out = [...prev];
+            const last = out[out.length - 1];
+            if (last?.role === "assistant") {
+              out[out.length - 1] = {
+                ...last,
+                status: undefined,
+                content: last.content === "thinking" ? "_(Stopped)_" : last.content,
+              };
+            }
+            return out;
+          });
+          return;
+        }
+        throw err;
+      } finally {
+        abortControllerRef.current = null;
+      }
+    },
+    [],
+  );
+
+  const handleAbort = useCallback(() => {
+    abortControllerRef.current?.abort();
+  }, []);
+
+  const handleFollowUp = useCallback((question: string) => {
+    setInput(question);
+    textareaRef.current?.focus();
+  }, []);
+
+  const exportConversation = useCallback(() => {
+    if (messages.length === 0) return;
+    const title =
+      conversations.find((c) => c.id === conversationId)?.title ?? "Conversation";
+    const lines: string[] = [
+      `# ${title}`,
+      `_Exported ${new Date().toLocaleString()}_`,
+      "",
+    ];
+    for (const msg of messages) {
+      if (msg.content === "thinking") continue;
+      lines.push(`### ${msg.role === "user" ? "You" : "Assistant"}`);
+      lines.push(msg.content);
+      for (const chart of msg.charts ?? []) {
+        if (chart.config?.title) { lines.push(""); lines.push(`_[Chart: ${chart.config.title}]_`); }
+      }
+      for (const table of msg.tables ?? []) {
+        if (table.title) { lines.push(""); lines.push(`_[Table: ${table.title}]_`); }
+      }
+      for (const memo of msg.memos ?? []) {
+        if (memo.title) {
+          lines.push(""); lines.push(`### ${memo.title}`);
+          lines.push(`**Executive Summary:** ${memo.executive_summary}`);
+          if (memo.recommendation) lines.push(`**Recommendation:** ${memo.recommendation}`);
+        }
+      }
+      for (const n of msg.narratives ?? []) {
+        lines.push(""); lines.push(`> ${n.narrative}`);
+      }
+      lines.push("");
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${title.replace(/[^a-z0-9]/gi, "-").toLowerCase()}-${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [messages, conversations, conversationId]);
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!input.trim() && !currentUpload) return;
@@ -746,7 +999,6 @@ export default function AIChat() {
       role: "user",
       content: input,
       file: currentUpload || undefined,
-      chartData: null,
     };
     // Clear the current upload from the input UI as soon as the message is sent
     // so the file preview/logo above the chat doesn't persist after sending.
@@ -755,7 +1007,6 @@ export default function AIChat() {
       id: crypto.randomUUID(),
       role: "assistant",
       content: "thinking",
-      chartData: null,
     };
     setMessages((prev) => [...prev, userMessage, thinkingMessage]);
     setInput("");
@@ -792,76 +1043,19 @@ export default function AIChat() {
       }
       return { role: msg.role, content: msg.content };
     });
+    const convId = await ensureConversation(input);
     const requestBody = {
       messages: apiMessages,
       model: selectedModel,
-      icfMapping: effectiveIcfObj,
-      includeLiveData: includeLiveData,
+      icfMapping: icfObj,
+      includeLiveData,
+      // Always pass portfolio data when available — the backend decides whether to use
+      // it based on includeLiveData, avoiding a redundant re-fetch in either mode.
+      portfolioData: portfolioJson ?? undefined,
+      conversationId: convId,
     };
     try {
-      const response = await fetch("/api/finance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-      if (!response.ok) throw new Error(String(response.status));
-      const data: APIResponse = await response.json();
-      const assistantMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: data.content,
-        hasToolUse: data.hasToolUse || !!data.toolUse,
-        chartData:
-          data.chartData || (data.toolUse?.input as ChartData) || null,
-      };
-      
-      setMessages((prev) => {
-        const newMessages = [...prev];
-        newMessages[newMessages.length - 1] = assistantMessage;
-        return newMessages;
-      });
-      
-      // Save both user and assistant messages to chat store
-      if (chatStore) {
-        try {
-          // Save user message
-          await chatStore.saveMessage({
-            id: userMessage.id,
-            role: 'user',
-            content: userMessage.content,
-            hasFile: !!userMessage.file,
-            file: userMessage.file || null,
-            hasToolUse: false,
-            chartData: null,
-            toolUse: null,
-          }, userMessage.file ? {
-            base64: userMessage.file.base64,
-            fileName: userMessage.file.fileName,
-            mediaType: userMessage.file.mediaType,
-            isText: userMessage.file.isText,
-          } : undefined);
-          
-          // Save assistant message
-          await chatStore.saveMessage({
-            id: assistantMessage.id,
-            role: 'assistant',
-            content: assistantMessage.content,
-            hasFile: false,
-            file: null,
-            hasToolUse: assistantMessage.hasToolUse || false,
-            chartData: assistantMessage.chartData,
-            toolUse: data.toolUse || null,
-          });
-        } catch (error) {
-          console.error('[ERROR] Failed to save messages to chat store:', error);
-          toast({
-            title: "Warning",
-            description: "Message saved locally but failed to sync to server",
-            variant: "destructive",
-          });
-        }
-      }
-      
+      await callFinanceStream(requestBody);
       setCurrentUpload(null);
     } catch {
       setMessages((prev) => {
@@ -870,7 +1064,6 @@ export default function AIChat() {
           id: crypto.randomUUID(),
           role: "assistant",
           content: "I encountered an error. Please try again.",
-          chartData: null,
         };
         return newMessages;
       });
@@ -917,43 +1110,13 @@ export default function AIChat() {
     textarea.style.height = `${newHeight}px`;
   };
 
-  const hasCharts = messages.some((m) => m.chartData);
-
-    const initializePromptHidden = (() => {
-    const payload = {
-      firmName,
-      accountName,
-      proposedCsv,
-      pdfUrl,
-      icfMapping: effectiveIcfObj,
-      portfolioData: portfolioJson,
-    };
-    const lines: string[] = [];
-    lines.push(
-      `Initialize portfolio memory and analysis context for firm "${firmName}" and account "${accountName}".`
-    );
-    lines.push(`Always use the PROPOSED portfolio CSV.`);
-    lines.push(
-      `You are given a JSON payload containing combined portfolio data under "portfolioData". Ingest and normalize it.`
-    );
-    lines.push(`Tasks:`);
-    lines.push(
-      `1) Summarize top holdings by weight and total value, and cash percentage.`
-    );
-    lines.push(`2) Build sector allocation and market-cap buckets.`);
-    lines.push(`3) Produce three charts:`);
-    lines.push(`   - Bar: Top 10 holdings by weight`);
-    lines.push(`   - Pie: Sector allocation`);
-    lines.push(
-      `   - Area or Line: Portfolio value over time (if series present), else bar by asset class`
-    );
-    lines.push(`Return a concise summary and chart configs JSON for rendering.`);
-    lines.push(`DATA JSON:`);
-    lines.push(JSON.stringify(payload));
-    return lines.join("\n");
-  })();
-
-  const initializePromptDisplay = `Initialize memory and analyze data for ${accountName} at ${firmName}. (details hidden)`;
+  const hasCharts = messages.some(
+    (m) =>
+      (m.charts?.length ?? 0) > 0 ||
+      (m.tables?.length ?? 0) > 0 ||
+      (m.memos?.length ?? 0) > 0 ||
+      (m.narratives?.length ?? 0) > 0
+  );
 
   const handleInitialize = async () => {
     if (!proposedCsv || !portfolioJson) {
@@ -969,73 +1132,26 @@ export default function AIChat() {
       id: crypto.randomUUID(),
       role: "user",
       content: initializePromptDisplay,
-      chartData: null,
     };
     const thinkingMsg: Message = {
       id: crypto.randomUUID(),
       role: "assistant",
       content: "thinking",
-      chartData: null,
     };
     setMessages((prev) => [...prev, userMsg, thinkingMsg]);
     setIsLoading(true);
     const msgs = [{ role: "user", content: initializePromptHidden }];
-    const body = { messages: msgs, model: selectedModel, icfMapping: effectiveIcfObj };
+    const convId = await ensureConversation(initializePromptDisplay);
+    const body = {
+      messages: msgs,
+      model: selectedModel,
+      icfMapping: icfObj,
+      includeLiveData,
+      portfolioData: portfolioJson ?? undefined,
+      conversationId: convId,
+    };
     try {
-      const res = await fetch("/api/finance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      const data: APIResponse = await res.json();
-      const assistantMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: data.content,
-        hasToolUse: data.hasToolUse || !!data.toolUse,
-        chartData: data.chartData || (data.toolUse?.input as ChartData) || null,
-      };
-      
-      setMessages((prev) => {
-        const out = [...prev];
-        out[out.length - 1] = assistantMessage;
-        return out;
-      });
-      
-      // Save initialization messages to chat store
-      if (chatStore) {
-        try {
-          await chatStore.saveMessage({
-            id: userMsg.id,
-            role: 'user',
-            content: userMsg.content,
-            hasFile: false,
-            file: null,
-            hasToolUse: false,
-            chartData: null,
-            toolUse: null,
-          });
-          
-          await chatStore.saveMessage({
-            id: assistantMessage.id,
-            role: 'assistant',
-            content: assistantMessage.content,
-            hasFile: false,
-            file: null,
-            hasToolUse: assistantMessage.hasToolUse || false,
-            chartData: assistantMessage.chartData,
-            toolUse: data.toolUse || null,
-          });
-        } catch (error) {
-          console.error('Failed to save initialization messages:', error);
-          toast({
-            title: "Warning",
-            description: "Initialization saved locally but failed to sync to server",
-            variant: "destructive",
-          });
-        }
-      }
+      await callFinanceStream(body);
     } catch {
       setMessages((prev) => {
         const out = [...prev];
@@ -1043,7 +1159,6 @@ export default function AIChat() {
           id: crypto.randomUUID(),
           role: "assistant",
           content: "Initialization failed. Please try again.",
-          chartData: null,
         };
         return out;
       });
@@ -1181,10 +1296,20 @@ export default function AIChat() {
         className="flex-1 flex bg-background mt-0 pt-0 h-[calc(100vh-4rem)] pb-32 resizable-container relative"
       >
         <Card 
-          className="flex flex-col h-full transition-all mr-2"
+          className="flex flex-col h-full transition-all mr-2 relative overflow-hidden"
           style={{ width: `calc(${leftPanelWidth}% - 0.5rem)` }}
         >
-          <CardHeader className="py-3 px-4">
+          {(isLoading || isUploading) && (
+            <div
+              className="pointer-events-none absolute inset-0 z-[5] overflow-hidden"
+              aria-hidden
+            >
+              <div className="absolute -inset-[25%] animate-fda-chat-ripple bg-[radial-gradient(ellipse_55%_45%_at_35%_45%,hsl(var(--primary)/0.35),transparent_72%)]" />
+              <div className="absolute -inset-[20%] animate-fda-chat-ripple-2 bg-[radial-gradient(ellipse_50%_40%_at_72%_58%,hsl(280_70%_55%/0.28),transparent_70%)]" />
+              <div className="absolute -inset-[15%] opacity-40 animate-fda-chat-ripple bg-[radial-gradient(circle_at_50%_120%,hsl(var(--chart-4)/0.45),transparent_55%)]" style={{ animationDelay: '0.8s' }} />
+            </div>
+          )}
+          <CardHeader className="py-3 px-4 relative z-[6]">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div>
@@ -1195,97 +1320,101 @@ export default function AIChat() {
                 </div>
               </div>
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="h-8 text-[11px]">
-                    {models.find((m) => m.id === selectedModel)?.name}
-                    <ChevronDown className="ml-2 h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  {models.map((model) => (
-                    <DropdownMenuItem
-                      key={model.id}
-                      onSelect={() => setSelectedModel(model.id)}
-                    >
-                      {model.name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </CardHeader>
-
-          <CardContent 
-            ref={messagesContainerRef}
-            className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory relative"
-            onScroll={(e) => {
-              // Debounce scroll handler for better performance
-              if (scrollTimeoutRef.current) {
-                clearTimeout(scrollTimeoutRef.current);
-              }
-              
-              const target = e.currentTarget;
-              const scrollTop = target.scrollTop;
-              const scrollHeight = target.scrollHeight;
-              const clientHeight = target.clientHeight;
-              
-              // Show jump buttons when scrolled away from top/bottom
-              const isNearTop = scrollTop < 100;
-              const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
-              setShowJumpButtons(!isNearTop && !isNearBottom);
-              
-              scrollTimeoutRef.current = setTimeout(() => {
-                // Lazy load older messages when scrolling near top
-                if (target && scrollTop !== null && scrollTop !== undefined && scrollTop < 200 && chatStore && chatStore.hasMoreChunks()) {
-                  const nextChunk = chatStore.getNextChunkIndex();
-                  if (nextChunk !== null && !chatStore.isLoading()) {
-                    chatStore.loadChunk(nextChunk).catch((error) => {
-                      console.error('Failed to load chunk:', error);
-                    });
-                  }
-                }
-              }, 150); // 150ms debounce
-            }}
-          >
-            {/* Jump to top/bottom buttons */}
-            {showJumpButtons && (
-              <div className="sticky top-4 z-10 flex justify-center gap-2 mb-2">
+              <div className="flex items-center gap-2">
+                <ReportGenerator
+                  messages={messages}
+                  clientName={accountName}
+                  firmName={firmName}
+                />
                 <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 px-3 text-[10px] bg-background/95 backdrop-blur-sm shadow-lg"
-                  onClick={() => {
-                    messagesContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={exportConversation}
+                  disabled={messages.length === 0 || isLoading}
+                  title="Export conversation as Markdown"
                 >
-                  <ArrowUp className="w-3 h-3 mr-1" />
-                  Top
+                  <Download className="h-4 w-4" />
                 </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-8 text-[11px]">
+                      {models.find((m) => m.id === selectedModel)?.name}
+                      <ChevronDown className="ml-2 h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    {models.map((model) => (
+                      <DropdownMenuItem
+                        key={model.id}
+                        onSelect={() => setSelectedModel(model.id)}
+                      >
+                        {model.name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+            {conversations.length > 0 && (
+              <div className="flex items-center gap-2 mt-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className="h-7 text-[11px] px-2 max-w-[200px]"
+                      disabled={loadingConversation}
+                    >
+                      {loadingConversation ? (
+                        <div className="flex items-center gap-1.5">
+                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current flex-shrink-0" />
+                          <span>Loading...</span>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="truncate">
+                            {conversations.find((c) => c.id === conversationId)?.title ?? "History"}
+                          </span>
+                          <ChevronDown className="ml-1 h-3 w-3 flex-shrink-0" />
+                        </>
+                      )}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[260px]">
+                    {conversations.map((c) => (
+                      <DropdownMenuItem
+                        key={c.id}
+                        onSelect={() => loadConversation(c.id)}
+                        className={`flex flex-col items-start gap-0.5 py-2 ${c.id === conversationId ? "bg-muted" : ""}`}
+                      >
+                        <span className={`text-[11px] truncate w-full ${c.id === conversationId ? "font-semibold" : ""}`}>
+                          {c.title}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {relativeTime(c.updatedAt)} · {c._count.messages} messages
+                        </span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button
                   variant="outline"
-                  size="sm"
-                  className="h-8 px-3 text-[10px] bg-background/95 backdrop-blur-sm shadow-lg"
+                  className="h-7 text-[11px] px-2 flex-shrink-0"
+                  disabled={loadingConversation}
                   onClick={() => {
-                    if (messagesContainerRef.current) {
-                      messagesContainerRef.current.scrollTo({ 
-                        top: messagesContainerRef.current.scrollHeight, 
-                        behavior: 'smooth' 
-                      });
-                    }
+                    setMessages([]);
+                    setConversationId(null);
+                    hasAutoInitialized.current = true; // keep true so auto-init doesn't fire; user starts fresh manually
                   }}
                 >
-                  <ArrowDown className="w-3 h-3 mr-1" />
-                  Bottom
+                  + New
                 </Button>
               </div>
             )}
-            {loadingHistory ? (
-              <div className="flex flex-col items-center justify-center h-full">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4" />
-                <p className="text-[12px] text-muted-foreground">Loading chat history...</p>
-              </div>
-            ) : messages.length === 0 ? (
+          </CardHeader>
+
+          <CardContent className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory relative z-[6]">
+            {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full animate-fade-in-up max-w-[95%] mx-auto">
                 <h2 className="text-[16px] mb-6">
                   Identify AI's Financial Assistant
@@ -1342,45 +1471,33 @@ export default function AIChat() {
               </div>
             ) : (
               <div className="space-y-4 min-h-full">
-                {chatStore && chatStore.isLoading() && chatStore.hasMoreChunks() && (
-                  <div className="flex items-center justify-center py-4">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2" />
-                    <span className="text-[11px] text-muted-foreground">Loading older messages...</span>
+                {messages.map((message, index) => (
+                  <div
+                    key={message.id}
+                    className={`animate-fade-in-up ${
+                      message.content === "thinking" ? "animate-pulse" : ""
+                    }`}
+                  >
+                    <MessageComponent message={message} />
+                    {message.role === "assistant" &&
+                      message.followUps &&
+                      message.followUps.length > 0 &&
+                      index === messages.length - 1 &&
+                      !isLoading && (
+                        <div className="flex flex-wrap gap-1.5 mt-2 ml-10">
+                          {message.followUps.map((q, i) => (
+                            <button
+                              key={i}
+                              onClick={() => handleFollowUp(q)}
+                              className="text-[11px] border rounded-full px-3 py-1 hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                   </div>
-                )}
-                {messages.map((message, index) => {
-                  const isOldMessage = index < messages.length - 5;
-                  // Only collapse assistant messages, user messages are always visible
-                  // Old assistant messages are collapsed by default unless explicitly expanded
-                  const isCollapsed = message.role === "assistant" && isOldMessage && !expandedMessages.has(message.id);
-                  return (
-                    <div
-                      key={message.id}
-                      className={`animate-fade-in-up ${
-                        message.content === "thinking" ? "animate-pulse" : ""
-                      }`}
-                    >
-                      <MessageComponent 
-                        message={message} 
-                        isCollapsed={isCollapsed}
-                        onToggleCollapse={() => {
-                          setExpandedMessages(prev => {
-                            const next = new Set(prev);
-                            if (next.has(message.id)) {
-                              next.delete(message.id);
-                            } else {
-                              next.add(message.id);
-                            }
-                            return next;
-                          });
-                        }}
-                        isOldMessage={isOldMessage}
-                        messageIndex={index}
-                        totalMessages={messages.length}
-                      />
-                    </div>
-                  );
-                })}
+                ))}
                 <div ref={messagesEndRef} className="h-4" />
               </div>
             )}
@@ -1421,23 +1538,52 @@ export default function AIChat() {
           >
             {hasCharts ? (
               <div className="min-h-full flex flex-col">
-                {messages.map(
-                  (message, index) =>
-                    message.chartData && (
-                      <div
-                        key={`chart-${index}`}
-                        className="w-full min-h-full flex-shrink-0 snap-start snap-always"
-                        ref={
-                          index ===
-                          messages.filter((m) => m.chartData).length - 1
-                            ? chartEndRef
-                            : null
-                        }
-                      >
-                        <SafeChartRenderer data={message.chartData} />
-                      </div>
-                    )
-                )}
+                {(() => {
+                  type PanelItem =
+                    | { type: "chart"; data: ChartData; key: string }
+                    | { type: "table"; data: TableData; key: string }
+                    | { type: "memo"; data: MemoData; key: string }
+                    | { type: "narrative"; data: NarrativeData; key: string };
+
+                  const items: PanelItem[] = [];
+                  messages.forEach((message, msgIdx) => {
+                    (message.charts ?? []).forEach((d, i) => items.push({ type: "chart", data: d, key: `chart-${msgIdx}-${i}` }));
+                    (message.tables ?? []).forEach((d, i) => items.push({ type: "table", data: d, key: `table-${msgIdx}-${i}` }));
+                    (message.memos ?? []).forEach((d, i) => items.push({ type: "memo", data: d, key: `memo-${msgIdx}-${i}` }));
+                    (message.narratives ?? []).forEach((d, i) => items.push({ type: "narrative", data: d, key: `narrative-${msgIdx}-${i}` }));
+                  });
+
+                  return items.map((item, idx) => (
+                    <div
+                      key={item.key}
+                      className="w-full min-h-full flex-shrink-0 snap-start snap-always"
+                      ref={idx === items.length - 1 ? chartEndRef : null}
+                    >
+                      {item.type === "chart" && <SafeChartRenderer data={item.data} />}
+                      {item.type === "table" && (
+                        <div className="w-full h-full p-6 flex flex-col">
+                          <div className="w-[90%] mx-auto">
+                            <DataTableRenderer data={item.data} />
+                          </div>
+                        </div>
+                      )}
+                      {item.type === "memo" && (
+                        <div className="w-full h-full p-6 flex flex-col">
+                          <div className="w-[90%] flex-1 mx-auto">
+                            <MemoRenderer data={item.data} />
+                          </div>
+                        </div>
+                      )}
+                      {item.type === "narrative" && (
+                        <div className="w-full h-full p-6 flex flex-col">
+                          <div className="w-[90%] mx-auto">
+                            <NarrativeCard data={item.data} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ));
+                })()}
               </div>
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-center">
@@ -1466,11 +1612,149 @@ export default function AIChat() {
 
       {hasCharts && (
         <ChartPagination
-          total={messages.filter((m) => m.chartData).length}
+          total={messages.reduce(
+            (acc, m) =>
+              acc + (m.charts?.length ?? 0) + (m.tables?.length ?? 0) +
+              (m.memos?.length ?? 0) + (m.narratives?.length ?? 0),
+            0
+          )}
           current={currentChartIndex}
           onDotClick={scrollToChart}
         />
       )}
+
+      <form
+        onSubmit={handleSubmit}
+        className={`fixed bottom-24 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl z-50 ${
+          isLoading || isUploading ? "" : "shadow-lg"
+        }`}
+      >
+        <div
+          className={`relative rounded-2xl ${
+            isLoading || isUploading ? "p-[2px]" : "rounded-2xl border bg-background"
+          }`}
+        >
+          {(isLoading || isUploading) && (
+            <div
+              className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden rounded-2xl"
+              aria-hidden
+            >
+              <div
+                className="h-[220%] aspect-square shrink-0 animate-spin opacity-[0.92] [animation-duration:3.2s]"
+                style={{
+                  background:
+                    "conic-gradient(from 0deg, #4285f4, #a855f7, #ec4899, #f97316, #eab308, #22c55e, #06b6d4, #4285f4)",
+                }}
+              />
+            </div>
+          )}
+
+          <div
+            className={`relative z-[1] bg-background ${
+              isLoading || isUploading ? "rounded-[calc(1rem-2px)]" : "rounded-2xl"
+            }`}
+          >
+            {currentUpload && (
+              <div className="w-full px-3 pt-3 border-b border-border/60">
+                <FilePreview
+                  file={currentUpload}
+                  onRemove={() => setCurrentUpload(null)}
+                />
+              </div>
+            )}
+
+            <div className="flex items-end gap-2 px-2 py-2.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isLoading || isUploading}
+                className="h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
+                title="Attach file"
+              >
+                <Paperclip className="h-5 w-5" />
+              </Button>
+
+              <div className="flex-1 min-w-0 flex flex-col gap-1">
+                <Textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  placeholder={
+                    isLoading || isUploading
+                      ? isUploading
+                        ? "Processing your file…"
+                        : "Generating your financial analysis…"
+                      : "Type your message…"
+                  }
+                  disabled={isLoading || isUploading}
+                  className="min-h-[48px] max-h-[200px] resize-none py-2.5 px-3 rounded-xl border-0 bg-muted/30 shadow-none focus-visible:ring-1 focus-visible:ring-primary/40 focus-visible:ring-offset-0"
+                  rows={1}
+                />
+                {(isLoading || isUploading) && (
+                  <div className="flex items-center gap-2 px-1 text-[10px] text-muted-foreground">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/50 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-primary/80" />
+                    </span>
+                    <span>
+                      {isUploading
+                        ? "Working on your upload…"
+                        : "Streaming analysis from the model…"}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col items-stretch gap-2 shrink-0 self-stretch justify-end pb-0.5">
+                <div className="flex items-center gap-1.5 justify-end">
+                  <label
+                    htmlFor="live-data-toggle"
+                    className="text-[10px] text-muted-foreground cursor-pointer leading-none whitespace-nowrap"
+                  >
+                    Live data
+                  </label>
+                  <Switch
+                    id="live-data-toggle"
+                    checked={includeLiveData}
+                    onCheckedChange={setIncludeLiveData}
+                    disabled={isLoading || isUploading}
+                    className="scale-90 origin-right"
+                  />
+                </div>
+                {isLoading ? (
+                  <Button
+                    type="button"
+                    onClick={handleAbort}
+                    className="h-9 w-9 rounded-full p-0 bg-destructive hover:bg-destructive/90 text-destructive-foreground shrink-0"
+                    title="Stop generating"
+                  >
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    disabled={isUploading || (!input.trim() && !currentUpload)}
+                    className="h-9 w-9 rounded-full p-0 shrink-0"
+                    title="Send"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+            </div>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }
