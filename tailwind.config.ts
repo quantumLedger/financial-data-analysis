@@ -65,7 +65,21 @@ const config: Config = {
   			lg: 'var(--radius)',
   			md: 'calc(var(--radius) - 2px)',
   			sm: 'calc(var(--radius) - 4px)'
-  		}
+  		},
+  		keyframes: {
+  			fdaChatRipple: {
+  				'0%, 100%': { transform: 'scale(1)', opacity: '0.14' },
+  				'50%': { transform: 'scale(1.08)', opacity: '0.22' },
+  			},
+  			fdaChatRipple2: {
+  				'0%, 100%': { transform: 'scale(1.05) translate(3%, -2%)', opacity: '0.1' },
+  				'50%': { transform: 'scale(1.12) translate(-2%, 3%)', opacity: '0.18' },
+  			},
+  		},
+  		animation: {
+  			'fda-chat-ripple': 'fdaChatRipple 4.5s ease-in-out infinite',
+  			'fda-chat-ripple-2': 'fdaChatRipple2 5.5s ease-in-out infinite 0.4s',
+  		},
   	}
   },
   plugins: [require("tailwindcss-animate")],

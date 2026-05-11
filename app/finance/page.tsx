@@ -1128,10 +1128,20 @@ export default function AIChat() {
         className="flex-1 flex bg-background p-4 pt-0 h-[calc(100vh-4rem)] pb-40 resizable-container relative"
       >
         <Card 
-          className="flex flex-col h-full transition-all mr-2"
+          className="flex flex-col h-full transition-all mr-2 relative overflow-hidden"
           style={{ width: `calc(${leftPanelWidth}% - 0.5rem)` }}
         >
-          <CardHeader className="py-3 px-4">
+          {(isLoading || isUploading) && (
+            <div
+              className="pointer-events-none absolute inset-0 z-[5] overflow-hidden"
+              aria-hidden
+            >
+              <div className="absolute -inset-[25%] animate-fda-chat-ripple bg-[radial-gradient(ellipse_55%_45%_at_35%_45%,hsl(var(--primary)/0.35),transparent_72%)]" />
+              <div className="absolute -inset-[20%] animate-fda-chat-ripple-2 bg-[radial-gradient(ellipse_50%_40%_at_72%_58%,hsl(280_70%_55%/0.28),transparent_70%)]" />
+              <div className="absolute -inset-[15%] opacity-40 animate-fda-chat-ripple bg-[radial-gradient(circle_at_50%_120%,hsl(var(--chart-4)/0.45),transparent_55%)]" style={{ animationDelay: '0.8s' }} />
+            </div>
+          )}
+          <CardHeader className="py-3 px-4 relative z-[6]">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div>
@@ -1235,7 +1245,7 @@ export default function AIChat() {
             )}
           </CardHeader>
 
-          <CardContent className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory">
+          <CardContent className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory relative z-[6]">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full animate-fade-in-up max-w-[95%] mx-auto">
                 <h2 className="text-[16px] mb-6">
@@ -1448,99 +1458,134 @@ export default function AIChat() {
 
       <form
         onSubmit={handleSubmit}
-        className="fixed bottom-24 left-1/2 -translate-x-1/2 
-                   w-[90%] max-w-4xl bg-background border rounded-xl shadow-lg
-                   z-50"
+        className={`fixed bottom-24 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl z-50 ${
+          isLoading || isUploading ? "" : "shadow-lg"
+        }`}
       >
-        <div className="flex flex-col gap-2">
-          {/* Live Data Toggle */}
-          <div className="flex items-center justify-end gap-2 px-3 pt-3">
-            <label htmlFor="live-data-toggle" className="text-[11px] text-muted-foreground cursor-pointer">
-              Include Live Data
-            </label>
-            <Switch
-              id="live-data-toggle"
-              checked={includeLiveData}
-              onCheckedChange={setIncludeLiveData}
-              disabled={isLoading || isUploading}
-            />
-          </div>
-
-          {currentUpload && (
-            <div className="w-full">
-              <FilePreview
-                file={currentUpload}
-                onRemove={() => setCurrentUpload(null)}
+        <div
+          className={`relative rounded-2xl ${
+            isLoading || isUploading ? "p-[2px]" : "rounded-2xl border bg-background"
+          }`}
+        >
+          {(isLoading || isUploading) && (
+            <div
+              className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden rounded-2xl"
+              aria-hidden
+            >
+              <div
+                className="h-[220%] aspect-square shrink-0 animate-spin opacity-[0.92] [animation-duration:3.2s]"
+                style={{
+                  background:
+                    "conic-gradient(from 0deg, #4285f4, #a855f7, #ec4899, #f97316, #eab308, #22c55e, #06b6d4, #4285f4)",
+                }}
               />
             </div>
           )}
 
-          <div className="flex items-end gap-2">
-            <div className="flex-1 relative">
+          <div
+            className={`relative z-[1] bg-background ${
+              isLoading || isUploading ? "rounded-[calc(1rem-2px)]" : "rounded-2xl"
+            }`}
+          >
+            {currentUpload && (
+              <div className="w-full px-3 pt-3 border-b border-border/60">
+                <FilePreview
+                  file={currentUpload}
+                  onRemove={() => setCurrentUpload(null)}
+                />
+              </div>
+            )}
+
+            <div className="flex items-end gap-2 px-2 py-2.5">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isLoading || isUploading}
-                className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8"
+                className="h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
+                title="Attach file"
               >
                 <Paperclip className="h-5 w-5" />
               </Button>
 
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                placeholder={
-                  isLoading || isUploading
-                    ? "Please wait while your request is processing..."
-                    : "Type your message..."
-                }
-                disabled={isLoading || isUploading}
-                className="min-h-[44px] max-h-[200px] resize-none pl-12 py-3 pr-12 rounded-lg border focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary transition"
-                rows={1}
+              <div className="flex-1 min-w-0 flex flex-col gap-1">
+                <Textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  placeholder={
+                    isLoading || isUploading
+                      ? isUploading
+                        ? "Processing your file…"
+                        : "Generating your financial analysis…"
+                      : "Type your message…"
+                  }
+                  disabled={isLoading || isUploading}
+                  className="min-h-[48px] max-h-[200px] resize-none py-2.5 px-3 rounded-xl border-0 bg-muted/30 shadow-none focus-visible:ring-1 focus-visible:ring-primary/40 focus-visible:ring-offset-0"
+                  rows={1}
+                />
+                {(isLoading || isUploading) && (
+                  <div className="flex items-center gap-2 px-1 text-[10px] text-muted-foreground">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/50 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-primary/80" />
+                    </span>
+                    <span>
+                      {isUploading
+                        ? "Working on your upload…"
+                        : "Streaming analysis from the model…"}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col items-stretch gap-2 shrink-0 self-stretch justify-end pb-0.5">
+                <div className="flex items-center gap-1.5 justify-end">
+                  <label
+                    htmlFor="live-data-toggle"
+                    className="text-[10px] text-muted-foreground cursor-pointer leading-none whitespace-nowrap"
+                  >
+                    Live data
+                  </label>
+                  <Switch
+                    id="live-data-toggle"
+                    checked={includeLiveData}
+                    onCheckedChange={setIncludeLiveData}
+                    disabled={isLoading || isUploading}
+                    className="scale-90 origin-right"
+                  />
+                </div>
+                {isLoading ? (
+                  <Button
+                    type="button"
+                    onClick={handleAbort}
+                    className="h-9 w-9 rounded-full p-0 bg-destructive hover:bg-destructive/90 text-destructive-foreground shrink-0"
+                    title="Stop generating"
+                  >
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    disabled={isUploading || (!input.trim() && !currentUpload)}
+                    className="h-9 w-9 rounded-full p-0 shrink-0"
+                    title="Send"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                onChange={handleFileSelect}
               />
-
-              {isLoading ? (
-                <Button
-                  type="button"
-                  onClick={handleAbort}
-                  className="absolute right-2 bottom-2 h-8 w-8 rounded-full p-0 bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-                  title="Stop generating"
-                >
-                  <Square className="h-3.5 w-3.5 fill-current" />
-                </Button>
-              ) : (
-                <Button
-                  type="submit"
-                  disabled={isUploading || (!input.trim() && !currentUpload)}
-                  className="absolute right-2 bottom-2 h-8 w-8 rounded-full p-0"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
-              )}
             </div>
-
-            <input
-              type="file"
-              ref={fileInputRef}
-              className="hidden"
-              onChange={handleFileSelect}
-            />
           </div>
-
-          {(isUploading || isLoading) && (
-            <div className="flex items-center gap-2 px-3 pb-3 text-subtitle1 text-muted-foreground">
-              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-muted-foreground" />
-              <span>
-                {isUploading
-                  ? "Processing your file..."
-                  : "Generating your financial analysis..."}
-              </span>
-            </div>
-          )}
         </div>
       </form>
     </div>
