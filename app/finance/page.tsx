@@ -25,6 +25,7 @@ import {
   Loader2,
   FileText,
   FileDown,
+  User,
 } from "lucide-react";
 import FilePreview from "@/components/FilePreview";
 import { ChartRenderer } from "@/components/ChartRenderer";
@@ -99,6 +100,7 @@ interface Message {
   id: string;
   role: string;
   content: string;
+  timestamp?: string; // ISO string set at creation time
   status?: string; // pre-stream status shown with spinner before first token
   hasToolUse?: boolean;
   file?: {
@@ -196,49 +198,49 @@ const MessageComponent: React.FC<MessageComponentProps & {
   isOldMessage?: boolean;
   messageIndex?: number;
   totalMessages?: number;
-}> = ({ message, isCollapsed = false, onToggleCollapse, isOldMessage = false, messageIndex = 0, totalMessages = 0 }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [isLongContent, setIsLongContent] = useState(false);
-  const MAX_PREVIEW_LENGTH = 500; // Characters to show before "Show more"
+}> = ({ message, isCollapsed = false, isOldMessage = false, messageIndex = 0, totalMessages = 0 }) => {
+  const isUser = message.role === "user";
+  const isThinking = message.content === "thinking";
 
-  useEffect(() => {
-    if (contentRef.current) {
-      const textLength = message.content.length;
-      setIsLongContent(textLength > MAX_PREVIEW_LENGTH);
-    }
-  }, [message.content]);
+  const timeStr = message.timestamp
+    ? new Date(message.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+    : new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 
-  // Only collapse assistant messages, not user messages
-  const shouldShowCollapse = message.role === "assistant" && isOldMessage && messageIndex < totalMessages - 5;
-  const displayContent = isLongContent && !isExpanded 
-    ? message.content.substring(0, MAX_PREVIEW_LENGTH) + '...'
-    : message.content;
+  const shouldShowCollapse = !isUser && isOldMessage && messageIndex < totalMessages - 5;
 
   return (
-    <div className={`flex items-start gap-2 ${shouldShowCollapse && isCollapsed ? 'opacity-60' : ''}`}>
-      {message.role === "assistant" && (
-        <Avatar className="w-8 h-8 border flex-shrink-0">
-          <AvatarImage src="/ant-logo.svg" alt="AI Assistant Avatar" />
+    <div className={`flex items-end gap-2 ${isUser ? "flex-row-reverse" : "flex-row"} ${shouldShowCollapse && isCollapsed ? "opacity-60" : ""}`}>
+      {/* Avatar */}
+      {isUser ? (
+        <div className="w-7 h-7 rounded-full bg-primary/10 border flex items-center justify-center flex-shrink-0 mb-4">
+          <User className="w-3.5 h-3.5 text-primary" />
+        </div>
+      ) : (
+        <Avatar className="w-7 h-7 border flex-shrink-0 mb-4">
+          <AvatarImage src="/ant-logo.svg" alt="AI" />
           <AvatarFallback>AI</AvatarFallback>
         </Avatar>
       )}
-      <div
-        className={`flex flex-col ${
-          message.role === "user" ? "max-w-[75%] ml-auto" : "w-full"
-        }`}
-      >
+
+      {/* Content column */}
+      <div className={`flex flex-col gap-0.5 ${isUser ? "items-end max-w-[78%]" : "items-start w-full"}`}>
+        {/* Label */}
+        <span className="text-[10px] font-semibold text-muted-foreground px-1 tracking-wide">
+          {isUser ? "You" : "Assistant"}
+        </span>
+
+        {/* Bubble */}
         <div
-          className={`p-3 rounded-md text-[12px] ${
-            message.role === "user"
+          className={`px-3 py-2.5 rounded-lg text-[12px] leading-relaxed ${
+            isUser
               ? "bg-primary text-primary-foreground"
-              : "bg-muted border"
+              : "bg-muted/60 border backdrop-blur-sm"
           }`}
         >
-          {message.content === "thinking" ? (
+          {isThinking ? (
             <div className="flex items-center gap-2 text-muted-foreground">
               <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-current flex-shrink-0" />
-              <span className="text-[11px]">{message.status ?? "Thinking..."}</span>
+              <span className="text-[11px]">{message.status ?? "Thinking…"}</span>
             </div>
           ) : (
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
@@ -246,6 +248,11 @@ const MessageComponent: React.FC<MessageComponentProps & {
             </ReactMarkdown>
           )}
         </div>
+
+        {/* Timestamp */}
+        {!isThinking && (
+          <span className="text-[9px] text-muted-foreground/50 px-1">{timeStr}</span>
+        )}
       </div>
     </div>
   );
@@ -581,11 +588,13 @@ export default function AIChat() {
         id: crypto.randomUUID(),
         role: "user",
         content: initializePromptDisplay,
+        timestamp: new Date().toISOString(),
       };
       const thinkingMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
         content: "thinking",
+        timestamp: new Date().toISOString(),
       };
       setMessages([userMsg, thinkingMsg]);
       setIsLoading(true);
@@ -1070,6 +1079,7 @@ export default function AIChat() {
       role: "user",
       content: input,
       file: currentUpload || undefined,
+      timestamp: new Date().toISOString(),
     };
     // Clear the current upload from the input UI as soon as the message is sent
     // so the file preview/logo above the chat doesn't persist after sending.
@@ -1078,6 +1088,7 @@ export default function AIChat() {
       id: crypto.randomUUID(),
       role: "assistant",
       content: "thinking",
+      timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMessage, thinkingMessage]);
     setInput("");
@@ -1201,11 +1212,13 @@ export default function AIChat() {
       id: crypto.randomUUID(),
       role: "user",
       content: initializePromptDisplay,
+      timestamp: new Date().toISOString(),
     };
     const thinkingMsg: Message = {
       id: crypto.randomUUID(),
       role: "assistant",
       content: "thinking",
+      timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg, thinkingMsg]);
     setIsLoading(true);
