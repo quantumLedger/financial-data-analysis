@@ -57,6 +57,39 @@
     }
 }
 
+/* ── AI bubble / water-blob animations (both panels during API calls) ── */
+@keyframes fdaBubble1 {
+    0%   { transform: translate(0%,   0%)  scale(1);    opacity: 0.18; }
+    20%  { transform: translate(6%,  -9%)  scale(1.14); opacity: 0.28; }
+    45%  { transform: translate(-5%, 11%)  scale(0.93); opacity: 0.20; }
+    70%  { transform: translate(9%,   5%)  scale(1.10); opacity: 0.26; }
+    100% { transform: translate(0%,   0%)  scale(1);    opacity: 0.18; }
+}
+@keyframes fdaBubble2 {
+    0%   { transform: translate(0%,   0%)  scale(1.06); opacity: 0.14; }
+    30%  { transform: translate(-9%,  -7%) scale(1.18); opacity: 0.24; }
+    60%  { transform: translate(6%,   9%)  scale(0.88); opacity: 0.17; }
+    100% { transform: translate(0%,   0%)  scale(1.06); opacity: 0.14; }
+}
+@keyframes fdaBubble3 {
+    0%   { transform: translate(0%,   0%)  scale(1);    opacity: 0.12; }
+    35%  { transform: translate(11%,  -6%) scale(1.22); opacity: 0.22; }
+    65%  { transform: translate(-7%, -11%) scale(0.86); opacity: 0.15; }
+    100% { transform: translate(0%,   0%)  scale(1);    opacity: 0.12; }
+}
+@keyframes fdaBubble4 {
+    0%   { transform: translate(0%,   0%)  scale(0.92); opacity: 0.16; }
+    25%  { transform: translate(-6%,  12%) scale(1.12); opacity: 0.26; }
+    55%  { transform: translate(10%,   4%) scale(1.20); opacity: 0.21; }
+    80%  { transform: translate(-3%,  -6%) scale(0.95); opacity: 0.18; }
+    100% { transform: translate(0%,   0%)  scale(0.92); opacity: 0.16; }
+}
+
+.animate-fda-bubble-1 { animation: fdaBubble1 5.2s ease-in-out infinite; }
+.animate-fda-bubble-2 { animation: fdaBubble2 6.8s ease-in-out infinite 0.6s; }
+.animate-fda-bubble-3 { animation: fdaBubble3 7.5s ease-in-out infinite 1.2s; }
+.animate-fda-bubble-4 { animation: fdaBubble4 5.9s ease-in-out infinite 1.8s; }
+
 @layer base {
     :root {
         --background: 0 0% 100%;
@@ -78,7 +111,7 @@
         --border: 214.3 31.8% 91.4%;
         --input: 214.3 31.8% 91.4%;
         --ring: 222.2 84% 4.9%;
-        --radius: 0.75rem;
+        --radius: 2px;
         --chart-1: 12 76% 61%;
         --chart-2: 173 58% 39%;
         --chart-3: 197 37% 24%;

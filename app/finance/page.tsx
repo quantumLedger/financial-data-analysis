@@ -1255,13 +1255,11 @@ export default function AIChat() {
           style={{ width: `calc(${leftPanelWidth}% - 0.5rem)` }}
         >
           {(isLoading || isUploading) && (
-            <div
-              className="pointer-events-none absolute inset-0 z-[5] overflow-hidden"
-              aria-hidden
-            >
-              <div className="absolute -inset-[25%] animate-fda-chat-ripple bg-[radial-gradient(ellipse_55%_45%_at_35%_45%,hsl(var(--primary)/0.35),transparent_72%)]" />
-              <div className="absolute -inset-[20%] animate-fda-chat-ripple-2 bg-[radial-gradient(ellipse_50%_40%_at_72%_58%,hsl(280_70%_55%/0.28),transparent_70%)]" />
-              <div className="absolute -inset-[15%] opacity-40 animate-fda-chat-ripple bg-[radial-gradient(circle_at_50%_120%,hsl(var(--chart-4)/0.45),transparent_55%)]" style={{ animationDelay: '0.8s' }} />
+            <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-hidden>
+              <div className="absolute -inset-[30%] animate-fda-bubble-1 bg-[radial-gradient(ellipse_55%_45%_at_35%_45%,hsl(var(--primary)/0.30),transparent_70%)]" />
+              <div className="absolute -inset-[25%] animate-fda-bubble-2 bg-[radial-gradient(ellipse_50%_42%_at_70%_55%,hsl(280_70%_55%/0.24),transparent_68%)]" />
+              <div className="absolute -inset-[20%] animate-fda-bubble-3 bg-[radial-gradient(ellipse_48%_40%_at_20%_70%,hsl(200_80%_55%/0.22),transparent_65%)]" />
+              <div className="absolute -inset-[22%] animate-fda-bubble-4 bg-[radial-gradient(circle_at_65%_25%,hsl(var(--chart-4)/0.28),transparent_60%)]" />
             </div>
           )}
           <CardHeader className="py-3 px-4 relative z-[6]">
@@ -1449,8 +1447,9 @@ export default function AIChat() {
                           {message.followUps.map((q, i) => (
                             <button
                               key={i}
-                              onClick={() => handleFollowUp(q)}
-                              className="text-[11px] border rounded-full px-3 py-1 hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                              onClick={() => !isLoading && handleFollowUp(q)}
+                              disabled={isLoading}
+                              className="text-[11px] border rounded-[2px] px-3 py-1 transition-colors text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted"
                             >
                               {q}
                             </button>
@@ -1483,18 +1482,27 @@ export default function AIChat() {
         </div>
 
         <Card 
-          className="flex flex-col h-full overflow-hidden transition-all ml-2"
+          className="flex flex-col h-full overflow-hidden transition-all ml-2 relative"
           style={{ width: `calc(${100 - leftPanelWidth}% - 0.5rem)` }}
         >
+          {(isLoading || isUploading) && (
+            <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-hidden>
+              <div className="absolute -inset-[30%] animate-fda-bubble-2 bg-[radial-gradient(ellipse_52%_44%_at_60%_40%,hsl(var(--primary)/0.28),transparent_70%)]" />
+              <div className="absolute -inset-[25%] animate-fda-bubble-4 bg-[radial-gradient(ellipse_48%_40%_at_30%_65%,hsl(280_70%_55%/0.22),transparent_68%)]" />
+              <div className="absolute -inset-[20%] animate-fda-bubble-1 bg-[radial-gradient(ellipse_45%_38%_at_75%_70%,hsl(200_80%_55%/0.20),transparent_65%)]" />
+              <div className="absolute -inset-[22%] animate-fda-bubble-3 bg-[radial-gradient(circle_at_35%_30%,hsl(var(--chart-4)/0.25),transparent_58%)]" />
+            </div>
+          )}
+
           {hasCharts && (
-            <CardHeader className="py-3 px-4 shrink-0">
+            <CardHeader className="py-3 px-4 shrink-0 relative z-[6]">
               <CardTitle className="text-h6">Analysis & Visualizations</CardTitle>
             </CardHeader>
           )}
 
           <CardContent
             ref={contentRef}
-            className="flex-1 overflow-y-auto min-h-0 snap-y snap-mandatory pb-20"
+            className="flex-1 overflow-y-auto min-h-0 snap-y snap-mandatory pb-20 relative z-[6]"
             onScroll={handleChartScroll}
           >
             {hasCharts ? (
@@ -1582,8 +1590,8 @@ export default function AIChat() {
           )}
 
           {/* Gradient border shell */}
-          <div className={`rounded-2xl transition-all ${isLoading || isUploading ? "animate-gradient-border p-[1.5px]" : ""}`}>
-          <div className={`flex items-center gap-1.5 px-2 py-1.5 bg-background rounded-2xl shadow-lg border ${isLoading || isUploading ? "border-transparent" : ""}`}>
+          <div className={`rounded-[2px] transition-all ${isLoading || isUploading ? "animate-gradient-border p-[1.5px]" : ""}`}>
+          <div className={`flex items-center gap-1.5 px-2 py-1.5 bg-background rounded-[2px] shadow-lg border ${isLoading || isUploading ? "border-transparent" : ""}`}>
 
             <Button
               type="button"
