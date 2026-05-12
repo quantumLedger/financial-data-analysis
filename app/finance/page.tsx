@@ -410,6 +410,13 @@ export default function AIChat() {
   const [leftPanelWidth, setLeftPanelWidth] = useState(33.33);
   const [isResizing, setIsResizing] = useState(false);
 
+  // Vertical height resize (for iframe embedding)
+  const MIN_HEIGHT = 220;
+  const [panelHeight, setPanelHeight] = useState<number | null>(null); // null = full screen
+  const [isHeightResizing, setIsHeightResizing] = useState(false);
+  const heightResizeStartY = useRef<number>(0);
+  const heightResizeStartH = useRef<number>(0);
+
   const loadConversation = useCallback(async (convId: string) => {
     setLoadingConversation(true);
     try {
@@ -735,6 +742,50 @@ export default function AIChat() {
       document.body.style.userSelect = '';
     };
   }, [isResizing]);
+
+  // Restore saved panel height after mount
+  useEffect(() => {
+    const saved = localStorage.getItem('panelHeight');
+    if (saved) setPanelHeight(parseFloat(saved));
+  }, []);
+
+  // Persist + notify parent frame when height changes
+  useEffect(() => {
+    if (panelHeight === null) return;
+    localStorage.setItem('panelHeight', panelHeight.toString());
+    try {
+      window.parent.postMessage({ type: 'fda-resize', height: panelHeight }, '*');
+    } catch {}
+  }, [panelHeight]);
+
+  // Height drag logic
+  useEffect(() => {
+    if (!isHeightResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      e.preventDefault();
+      const delta = e.clientY - heightResizeStartY.current;
+      const newH = Math.max(MIN_HEIGHT, heightResizeStartH.current + delta);
+      setPanelHeight(newH);
+    };
+
+    const handleMouseUp = () => {
+      setIsHeightResizing(false);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', handleMouseMove, { passive: false });
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isHeightResizing]);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1237,7 +1288,34 @@ export default function AIChat() {
   };
 
   return (
-    <div className="flex flex-col h-screen" style={{ position: 'relative', overflow: 'visible' }}>
+    <div
+      className="flex flex-col"
+      style={{
+        position: 'relative',
+        overflow: 'visible',
+        height: panelHeight !== null ? `${panelHeight}px` : '100vh',
+        minHeight: `${MIN_HEIGHT}px`,
+      }}
+    >
+      {/* ── Height resize handle ────────────────────────────────────────────── */}
+      <div
+        className="flex-shrink-0 h-3 flex items-center justify-center cursor-ns-resize group select-none bg-background border-b hover:bg-muted/60 transition-colors"
+        title="Drag to resize height"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          heightResizeStartY.current = e.clientY;
+          heightResizeStartH.current = panelHeight ?? window.innerHeight;
+          setIsHeightResizing(true);
+        }}
+        onDoubleClick={() => {
+          setPanelHeight(null);
+          localStorage.removeItem('panelHeight');
+          try { window.parent.postMessage({ type: 'fda-resize', height: null }, '*'); } catch {}
+        }}
+      >
+        <div className="w-12 h-1 rounded-full bg-muted-foreground/30 group-hover:bg-primary/60 transition-colors" />
+      </div>
+
       <TopNavBar
         features={{
           showDomainSelector: false,
@@ -1248,7 +1326,7 @@ export default function AIChat() {
 
       <div 
         ref={resizableContainerRef}
-        className="flex-1 flex bg-background mt-0 pt-0 h-[calc(100vh-4rem)] pb-20 resizable-container relative"
+        className="flex-1 flex bg-background mt-0 pt-0 pb-20 resizable-container relative overflow-hidden"
       >
         <Card 
           className="flex flex-col h-full transition-all mr-2 relative overflow-hidden"
