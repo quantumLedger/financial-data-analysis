@@ -1,6 +1,7 @@
 import { config } from "dotenv";
-// Load .env.local first (takes precedence), then fall back to .env
+// Load in priority order: .env.local → .env.prod → .env
 config({ path: ".env.local" });
+config({ path: ".env.prod" });
 config();
 
 import { defineConfig, env } from "@prisma/config";
