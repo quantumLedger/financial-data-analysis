@@ -1248,7 +1248,7 @@ export default function AIChat() {
 
       <div 
         ref={resizableContainerRef}
-        className="flex-1 flex bg-background mt-0 pt-0 h-[calc(100vh-4rem)] pb-20 resizable-container relative"
+        className="flex-1 flex bg-background mt-0 pt-0 h-[calc(100vh-4rem)] resizable-container relative"
       >
         <Card 
           className="flex flex-col h-full transition-all mr-2 relative overflow-hidden"
@@ -1374,7 +1374,7 @@ export default function AIChat() {
             )}
           </CardHeader>
 
-          <CardContent className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory relative z-[6]">
+          <CardContent className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory relative z-[6] pb-2">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full animate-fade-in-up max-w-[95%] mx-auto">
                 <h2 className="text-[16px] mb-6">
@@ -1463,6 +1463,114 @@ export default function AIChat() {
               </div>
             )}
           </CardContent>
+
+          {/* ── Floating input — anchored to bottom of chat panel ── */}
+          <div className="flex-shrink-0 px-3 pb-5 pt-2 relative z-[6]">
+            <form onSubmit={handleSubmit}>
+              {currentUpload && (
+                <div className="mb-2 px-1">
+                  <FilePreview file={currentUpload} onRemove={() => setCurrentUpload(null)} />
+                </div>
+              )}
+
+              {/* Gradient border shell — visible only while API call is in progress */}
+              <div className={`rounded-2xl transition-all ${isLoading || isUploading ? "animate-gradient-border p-[1.5px]" : ""}`}>
+              <div className={`flex items-center gap-1.5 px-2 py-1.5 bg-background rounded-2xl shadow-lg border ${isLoading || isUploading ? "border-transparent" : ""}`}>
+
+                {/* Attach */}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading || isUploading}
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                  title="Attach file"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+
+                {/* Textarea */}
+                <Textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  placeholder={
+                    isLoading
+                      ? "Generating analysis…"
+                      : isUploading
+                      ? "Processing file…"
+                      : "Ask a question about your portfolio…"
+                  }
+                  readOnly={isLoading || isUploading}
+                  className="flex-1 min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent shadow-none py-2 px-1 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                  rows={1}
+                />
+
+                {/* Inline status when busy */}
+                {(isLoading || isUploading) && (
+                  <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60 opacity-75" />
+                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary/80" />
+                    </span>
+                    {isUploading ? "Uploading…" : "Analyzing…"}
+                  </div>
+                )}
+
+                {/* Divider */}
+                <div className="h-5 w-px bg-border shrink-0" />
+
+                {/* Live data toggle */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <label
+                    htmlFor="live-data-toggle"
+                    className="text-[10px] text-muted-foreground cursor-pointer whitespace-nowrap"
+                  >
+                    Live
+                  </label>
+                  <Switch
+                    id="live-data-toggle"
+                    checked={includeLiveData}
+                    onCheckedChange={setIncludeLiveData}
+                    className="scale-75 origin-right"
+                  />
+                </div>
+
+                {/* Stop / Send */}
+                {isLoading ? (
+                  <Button
+                    type="button"
+                    onClick={handleAbort}
+                    size="icon"
+                    className="h-8 w-8 rounded-full shrink-0 bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                    title="Stop generating"
+                  >
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    size="icon"
+                    disabled={isUploading || (!input.trim() && !currentUpload)}
+                    className="h-8 w-8 rounded-full shrink-0"
+                    title="Send"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>{/* end flex row */}
+              </div>{/* end gradient border shell */}
+
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+            </form>
+          </div>
         </Card>
 
         {/* Resizable divider */}
@@ -1583,114 +1691,6 @@ export default function AIChat() {
           onDotClick={scrollToChart}
         />
       )}
-
-      <form
-        onSubmit={handleSubmit}
-        className="fixed bottom-5 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl z-50"
-      >
-        {currentUpload && (
-          <div className="mb-2 px-1">
-            <FilePreview file={currentUpload} onRemove={() => setCurrentUpload(null)} />
-          </div>
-        )}
-
-        {/* Gradient border shell — visible only while API call is in progress */}
-        <div className={`rounded-2xl transition-all ${isLoading || isUploading ? "animate-gradient-border p-[1.5px]" : ""}`}>
-        <div className={`flex items-center gap-1.5 px-2 py-1.5 bg-background rounded-2xl shadow-lg border ${isLoading || isUploading ? "border-transparent" : ""}`}>
-
-          {/* Attach */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isLoading || isUploading}
-            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-            title="Attach file"
-          >
-            <Paperclip className="h-4 w-4" />
-          </Button>
-
-          {/* Textarea — readOnly while streaming, never visually disabled */}
-          <Textarea
-            ref={textareaRef}
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              isLoading
-                ? "Generating analysis…"
-                : isUploading
-                ? "Processing file…"
-                : "Ask a question about your portfolio…"
-            }
-            readOnly={isLoading || isUploading}
-            className="flex-1 min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent shadow-none py-2 px-1 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
-            rows={1}
-          />
-
-          {/* Inline status when busy */}
-          {(isLoading || isUploading) && (
-            <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60 opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary/80" />
-              </span>
-              {isUploading ? "Uploading…" : "Analyzing…"}
-            </div>
-          )}
-
-          {/* Divider */}
-          <div className="h-5 w-px bg-border shrink-0" />
-
-          {/* Live data toggle */}
-          <div className="flex items-center gap-1 shrink-0">
-            <label
-              htmlFor="live-data-toggle"
-              className="text-[10px] text-muted-foreground cursor-pointer whitespace-nowrap"
-            >
-              Live
-            </label>
-            <Switch
-              id="live-data-toggle"
-              checked={includeLiveData}
-              onCheckedChange={setIncludeLiveData}
-              className="scale-75 origin-right"
-            />
-          </div>
-
-          {/* Stop / Send */}
-          {isLoading ? (
-            <Button
-              type="button"
-              onClick={handleAbort}
-              size="icon"
-              className="h-8 w-8 rounded-full shrink-0 bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-              title="Stop generating"
-            >
-              <Square className="h-3.5 w-3.5 fill-current" />
-            </Button>
-          ) : (
-            <Button
-              type="submit"
-              size="icon"
-              disabled={isUploading || (!input.trim() && !currentUpload)}
-              className="h-8 w-8 rounded-full shrink-0"
-              title="Send"
-            >
-              <Send className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>{/* end flex row */}
-        </div>{/* end gradient border shell */}
-
-        <input
-          type="file"
-          ref={fileInputRef}
-          className="hidden"
-          onChange={handleFileSelect}
-        />
-      </form>
 
       {/* Export popup — fixed to viewport, unaffected by overflow-hidden on Card */}
       {showExportPopup && exportPopupPos && (
