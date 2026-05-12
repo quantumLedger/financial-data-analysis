@@ -1342,16 +1342,35 @@ export default function AIChat() {
           className="flex flex-col h-full transition-all mr-2 relative overflow-hidden"
           style={{ width: `calc(${leftPanelWidth}% - 0.5rem)` }}
         >
-          {/* Always-on ambient bubble animation — intensifies during API calls */}
+          {/* Always-on ambient bubble — pink/blue AI-flow during API calls */}
           <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-hidden>
-            <div className="absolute -inset-[30%] animate-fda-bubble-1 transition-opacity duration-700"
-              style={{ backgroundImage: `radial-gradient(ellipse 55% 45% at 35% 45%, hsl(var(--primary)/${isLoading || isUploading ? "0.32" : "0.16"}), transparent 70%)`, opacity: isLoading || isUploading ? 1 : 0.7 }} />
-            <div className="absolute -inset-[25%] animate-fda-bubble-2 transition-opacity duration-700"
-              style={{ backgroundImage: `radial-gradient(ellipse 50% 42% at 70% 55%, hsl(280 70% 55% / ${isLoading || isUploading ? "0.26" : "0.13"}), transparent 68%)`, opacity: isLoading || isUploading ? 1 : 0.7 }} />
-            <div className="absolute -inset-[20%] animate-fda-bubble-3 transition-opacity duration-700"
-              style={{ backgroundImage: `radial-gradient(ellipse 48% 40% at 20% 70%, hsl(200 80% 55% / ${isLoading || isUploading ? "0.24" : "0.11"}), transparent 65%)`, opacity: isLoading || isUploading ? 1 : 0.7 }} />
-            <div className="absolute -inset-[22%] animate-fda-bubble-4 transition-opacity duration-700"
-              style={{ backgroundImage: `radial-gradient(circle at 65% 25%, hsl(var(--chart-4) / ${isLoading || isUploading ? "0.30" : "0.13"}), transparent 60%)`, opacity: isLoading || isUploading ? 1 : 0.7 }} />
+            {/* idle: soft indigo   |  loading: vivid pink */}
+            <div className="absolute -inset-[30%] animate-fda-bubble-1 transition-all duration-700"
+              style={{ backgroundImage: isLoading || isUploading
+                ? "radial-gradient(ellipse 60% 50% at 35% 45%, hsl(330 90% 65% / 0.45), transparent 68%)"
+                : "radial-gradient(ellipse 55% 45% at 35% 45%, hsl(var(--primary) / 0.14), transparent 70%)" }} />
+            {/* idle: soft purple   |  loading: vivid blue */}
+            <div className="absolute -inset-[25%] animate-fda-bubble-2 transition-all duration-700"
+              style={{ backgroundImage: isLoading || isUploading
+                ? "radial-gradient(ellipse 55% 45% at 72% 55%, hsl(220 90% 62% / 0.40), transparent 66%)"
+                : "radial-gradient(ellipse 50% 42% at 70% 55%, hsl(280 70% 55% / 0.11), transparent 68%)" }} />
+            {/* idle: soft cyan     |  loading: hot pink / magenta */}
+            <div className="absolute -inset-[20%] animate-fda-bubble-3 transition-all duration-700"
+              style={{ backgroundImage: isLoading || isUploading
+                ? "radial-gradient(ellipse 50% 42% at 18% 68%, hsl(310 85% 62% / 0.38), transparent 63%)"
+                : "radial-gradient(ellipse 48% 40% at 20% 70%, hsl(200 80% 55% / 0.09), transparent 65%)" }} />
+            {/* idle: soft amber    |  loading: electric blue */}
+            <div className="absolute -inset-[22%] animate-fda-bubble-4 transition-all duration-700"
+              style={{ backgroundImage: isLoading || isUploading
+                ? "radial-gradient(circle at 67% 24%, hsl(200 95% 58% / 0.42), transparent 58%)"
+                : "radial-gradient(circle at 65% 25%, hsl(var(--chart-4) / 0.11), transparent 60%)" }} />
+            {/* extra bloom — only during loading */}
+            <div className="absolute -inset-[18%] animate-fda-bubble-1 transition-opacity duration-700"
+              style={{
+                backgroundImage: "radial-gradient(ellipse 45% 38% at 50% 50%, hsl(270 85% 65% / 0.30), transparent 62%)",
+                opacity: isLoading || isUploading ? 1 : 0,
+                animationDelay: "2s",
+              }} />
           </div>
           <CardHeader className="py-3 px-4 relative z-[6]">
             <div className="flex items-center justify-between">
@@ -1581,16 +1600,35 @@ export default function AIChat() {
           className="flex flex-col h-full overflow-hidden transition-all ml-2 relative"
           style={{ width: `calc(${100 - leftPanelWidth}% - 0.5rem)` }}
         >
-          {/* Always-on ambient bubble animation — intensifies during API calls */}
+          {/* Always-on ambient bubble — pink/blue AI-flow during API calls */}
           <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-hidden>
-            <div className="absolute -inset-[30%] animate-fda-bubble-2 transition-opacity duration-700"
-              style={{ backgroundImage: `radial-gradient(ellipse 52% 44% at 60% 40%, hsl(var(--primary)/${isLoading || isUploading ? "0.30" : "0.14"}), transparent 70%)`, opacity: isLoading || isUploading ? 1 : 0.7 }} />
-            <div className="absolute -inset-[25%] animate-fda-bubble-4 transition-opacity duration-700"
-              style={{ backgroundImage: `radial-gradient(ellipse 48% 40% at 30% 65%, hsl(280 70% 55% / ${isLoading || isUploading ? "0.24" : "0.11"}), transparent 68%)`, opacity: isLoading || isUploading ? 1 : 0.7 }} />
-            <div className="absolute -inset-[20%] animate-fda-bubble-1 transition-opacity duration-700"
-              style={{ backgroundImage: `radial-gradient(ellipse 45% 38% at 75% 70%, hsl(200 80% 55% / ${isLoading || isUploading ? "0.22" : "0.10"}), transparent 65%)`, opacity: isLoading || isUploading ? 1 : 0.7 }} />
-            <div className="absolute -inset-[22%] animate-fda-bubble-3 transition-opacity duration-700"
-              style={{ backgroundImage: `radial-gradient(circle at 35% 30%, hsl(var(--chart-4) / ${isLoading || isUploading ? "0.27" : "0.12"}), transparent 58%)`, opacity: isLoading || isUploading ? 1 : 0.7 }} />
+            {/* idle: soft primary  |  loading: vivid blue */}
+            <div className="absolute -inset-[30%] animate-fda-bubble-2 transition-all duration-700"
+              style={{ backgroundImage: isLoading || isUploading
+                ? "radial-gradient(ellipse 58% 48% at 62% 40%, hsl(220 90% 62% / 0.44), transparent 66%)"
+                : "radial-gradient(ellipse 52% 44% at 60% 40%, hsl(var(--primary) / 0.13), transparent 70%)" }} />
+            {/* idle: soft purple   |  loading: hot pink */}
+            <div className="absolute -inset-[25%] animate-fda-bubble-4 transition-all duration-700"
+              style={{ backgroundImage: isLoading || isUploading
+                ? "radial-gradient(ellipse 52% 43% at 28% 65%, hsl(330 88% 64% / 0.40), transparent 64%)"
+                : "radial-gradient(ellipse 48% 40% at 30% 65%, hsl(280 70% 55% / 0.10), transparent 68%)" }} />
+            {/* idle: soft cyan     |  loading: magenta */}
+            <div className="absolute -inset-[20%] animate-fda-bubble-1 transition-all duration-700"
+              style={{ backgroundImage: isLoading || isUploading
+                ? "radial-gradient(ellipse 48% 40% at 77% 70%, hsl(310 85% 62% / 0.37), transparent 62%)"
+                : "radial-gradient(ellipse 45% 38% at 75% 70%, hsl(200 80% 55% / 0.09), transparent 65%)" }} />
+            {/* idle: soft amber    |  loading: electric cyan */}
+            <div className="absolute -inset-[22%] animate-fda-bubble-3 transition-all duration-700"
+              style={{ backgroundImage: isLoading || isUploading
+                ? "radial-gradient(circle at 33% 30%, hsl(195 95% 56% / 0.38), transparent 56%)"
+                : "radial-gradient(circle at 35% 30%, hsl(var(--chart-4) / 0.11), transparent 58%)" }} />
+            {/* extra bloom — only during loading */}
+            <div className="absolute -inset-[18%] animate-fda-bubble-2 transition-opacity duration-700"
+              style={{
+                backgroundImage: "radial-gradient(ellipse 42% 36% at 50% 50%, hsl(270 85% 65% / 0.28), transparent 60%)",
+                opacity: isLoading || isUploading ? 1 : 0,
+                animationDelay: "1.5s",
+              }} />
           </div>
 
           {hasCharts && (
