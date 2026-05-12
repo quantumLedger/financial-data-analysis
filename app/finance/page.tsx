@@ -1254,14 +1254,17 @@ export default function AIChat() {
           className="flex flex-col h-full transition-all mr-2 relative overflow-hidden"
           style={{ width: `calc(${leftPanelWidth}% - 0.5rem)` }}
         >
-          {(isLoading || isUploading) && (
-            <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-hidden>
-              <div className="absolute -inset-[30%] animate-fda-bubble-1 bg-[radial-gradient(ellipse_55%_45%_at_35%_45%,hsl(var(--primary)/0.30),transparent_70%)]" />
-              <div className="absolute -inset-[25%] animate-fda-bubble-2 bg-[radial-gradient(ellipse_50%_42%_at_70%_55%,hsl(280_70%_55%/0.24),transparent_68%)]" />
-              <div className="absolute -inset-[20%] animate-fda-bubble-3 bg-[radial-gradient(ellipse_48%_40%_at_20%_70%,hsl(200_80%_55%/0.22),transparent_65%)]" />
-              <div className="absolute -inset-[22%] animate-fda-bubble-4 bg-[radial-gradient(circle_at_65%_25%,hsl(var(--chart-4)/0.28),transparent_60%)]" />
-            </div>
-          )}
+          {/* Always-on ambient bubble animation — intensifies during API calls */}
+          <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-hidden>
+            <div className={`absolute -inset-[30%] animate-fda-bubble-1 bg-[radial-gradient(ellipse_55%_45%_at_35%_45%,hsl(var(--primary)/VAR),transparent_70%)] transition-opacity duration-700 ${isLoading || isUploading ? "opacity-100" : "opacity-50"}`}
+              style={{ backgroundImage: `radial-gradient(ellipse 55% 45% at 35% 45%, hsl(var(--primary)/${isLoading || isUploading ? "0.30" : "0.14"}), transparent 70%)` }} />
+            <div className={`absolute -inset-[25%] animate-fda-bubble-2 transition-opacity duration-700 ${isLoading || isUploading ? "opacity-100" : "opacity-50"}`}
+              style={{ backgroundImage: `radial-gradient(ellipse 50% 42% at 70% 55%, hsl(280 70% 55% / ${isLoading || isUploading ? "0.24" : "0.10"}), transparent 68%)` }} />
+            <div className={`absolute -inset-[20%] animate-fda-bubble-3 transition-opacity duration-700 ${isLoading || isUploading ? "opacity-100" : "opacity-50"}`}
+              style={{ backgroundImage: `radial-gradient(ellipse 48% 40% at 20% 70%, hsl(200 80% 55% / ${isLoading || isUploading ? "0.22" : "0.09"}), transparent 65%)` }} />
+            <div className={`absolute -inset-[22%] animate-fda-bubble-4 transition-opacity duration-700 ${isLoading || isUploading ? "opacity-100" : "opacity-50"}`}
+              style={{ backgroundImage: `radial-gradient(circle at 65% 25%, hsl(var(--chart-4) / ${isLoading || isUploading ? "0.28" : "0.11"}), transparent 60%)` }} />
+          </div>
           <CardHeader className="py-3 px-4 relative z-[6]">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
@@ -1275,7 +1278,7 @@ export default function AIChat() {
 
               <div className="flex items-center gap-2">
                 {/* Single export button — popup rendered as fixed portal below */}
-                <div className="relative" ref={exportPopupRef}>
+                <div className="relative group" ref={exportPopupRef}>
                   <Button
                     ref={exportBtnRef}
                     variant="ghost"
@@ -1289,10 +1292,15 @@ export default function AIChat() {
                       setShowExportPopup((v) => !v);
                     }}
                     disabled={messages.length === 0 || isLoading}
-                    title="Export conversation"
                   >
                     <Download className="h-4 w-4" />
                   </Button>
+                  {/* Hover tooltip */}
+                  <div className="pointer-events-none absolute top-full right-0 mt-1.5 z-[300] opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                    <div className="bg-popover border rounded-lg shadow-md px-2.5 py-1.5 text-[10px] whitespace-nowrap text-popover-foreground">
+                      Export as Markdown or PDF
+                    </div>
+                  </div>
                 </div>
 
                 <DropdownMenu>
@@ -1485,14 +1493,17 @@ export default function AIChat() {
           className="flex flex-col h-full overflow-hidden transition-all ml-2 relative"
           style={{ width: `calc(${100 - leftPanelWidth}% - 0.5rem)` }}
         >
-          {(isLoading || isUploading) && (
-            <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-hidden>
-              <div className="absolute -inset-[30%] animate-fda-bubble-2 bg-[radial-gradient(ellipse_52%_44%_at_60%_40%,hsl(var(--primary)/0.28),transparent_70%)]" />
-              <div className="absolute -inset-[25%] animate-fda-bubble-4 bg-[radial-gradient(ellipse_48%_40%_at_30%_65%,hsl(280_70%_55%/0.22),transparent_68%)]" />
-              <div className="absolute -inset-[20%] animate-fda-bubble-1 bg-[radial-gradient(ellipse_45%_38%_at_75%_70%,hsl(200_80%_55%/0.20),transparent_65%)]" />
-              <div className="absolute -inset-[22%] animate-fda-bubble-3 bg-[radial-gradient(circle_at_35%_30%,hsl(var(--chart-4)/0.25),transparent_58%)]" />
-            </div>
-          )}
+          {/* Always-on ambient bubble animation — intensifies during API calls */}
+          <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-hidden>
+            <div className={`absolute -inset-[30%] animate-fda-bubble-2 transition-opacity duration-700 ${isLoading || isUploading ? "opacity-100" : "opacity-50"}`}
+              style={{ backgroundImage: `radial-gradient(ellipse 52% 44% at 60% 40%, hsl(var(--primary)/${isLoading || isUploading ? "0.28" : "0.12"}), transparent 70%)` }} />
+            <div className={`absolute -inset-[25%] animate-fda-bubble-4 transition-opacity duration-700 ${isLoading || isUploading ? "opacity-100" : "opacity-50"}`}
+              style={{ backgroundImage: `radial-gradient(ellipse 48% 40% at 30% 65%, hsl(280 70% 55% / ${isLoading || isUploading ? "0.22" : "0.09"}), transparent 68%)` }} />
+            <div className={`absolute -inset-[20%] animate-fda-bubble-1 transition-opacity duration-700 ${isLoading || isUploading ? "opacity-100" : "opacity-50"}`}
+              style={{ backgroundImage: `radial-gradient(ellipse 45% 38% at 75% 70%, hsl(200 80% 55% / ${isLoading || isUploading ? "0.20" : "0.08"}), transparent 65%)` }} />
+            <div className={`absolute -inset-[22%] animate-fda-bubble-3 transition-opacity duration-700 ${isLoading || isUploading ? "opacity-100" : "opacity-50"}`}
+              style={{ backgroundImage: `radial-gradient(circle at 35% 30%, hsl(var(--chart-4) / ${isLoading || isUploading ? "0.25" : "0.10"}), transparent 58%)` }} />
+          </div>
 
           {hasCharts && (
             <CardHeader className="py-3 px-4 shrink-0 relative z-[6]">
@@ -1591,7 +1602,7 @@ export default function AIChat() {
 
           {/* Gradient border shell */}
           <div className={`rounded-lg transition-all ${isLoading || isUploading ? "animate-gradient-border p-[1.5px]" : ""}`}>
-          <div className={`flex items-center gap-1.5 px-2 py-1.5 bg-background rounded-lg shadow-lg border ${isLoading || isUploading ? "border-transparent" : ""}`}>
+          <div className={`flex items-center gap-1.5 px-2 py-1.5 bg-background/70 backdrop-blur-md rounded-lg shadow-lg border ${isLoading || isUploading ? "border-transparent" : ""}`}>
 
             <Button
               type="button"
