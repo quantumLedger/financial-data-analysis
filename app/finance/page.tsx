@@ -223,8 +223,11 @@ const MessageComponent: React.FC<MessageComponentProps & {
   }, [message.content]);
 
   return (
-    <div className={`flex items-start gap-2.5 ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
-      {/* Avatar — always on the left */}
+    <div className={`flex items-start gap-2.5 ${
+      isUser ? "flex-row-reverse" : "flex-row"
+    } ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
+
+      {/* Avatar */}
       <div className="flex-shrink-0 mt-0.5">
         {isUser ? (
           <div className="w-7 h-7 rounded-full bg-primary/10 border flex items-center justify-center">
@@ -238,10 +241,10 @@ const MessageComponent: React.FC<MessageComponentProps & {
         )}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        {/* Name + time on one line */}
-        <div className="flex items-center gap-2 mb-1">
+      {/* Content — user right-aligned, assistant left-aligned */}
+      <div className={`min-w-0 ${isUser ? "items-end flex flex-col max-w-[78%]" : "flex-1 flex flex-col"}`}>
+        {/* Name + time */}
+        <div className={`flex items-center gap-2 mb-1 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
           <span className="text-[11px] font-semibold text-foreground">
             {isUser ? "You" : "Assistant"}
           </span>
@@ -251,7 +254,7 @@ const MessageComponent: React.FC<MessageComponentProps & {
         </div>
 
         {/* Bubble with height cap */}
-        <div className="relative">
+        <div className="relative w-full">
           <div
             ref={bubbleInnerRef}
             style={{ maxHeight: expanded ? undefined : MAX_MSG_HEIGHT }}
@@ -276,16 +279,14 @@ const MessageComponent: React.FC<MessageComponentProps & {
           {/* Fade + Read more */}
           {overflows && !expanded && (
             <div className={`absolute bottom-0 left-0 right-0 h-14 flex items-end justify-center pb-2 rounded-b-lg ${
-              isUser
-                ? "bg-gradient-to-t from-primary/90 to-transparent"
-                : "bg-gradient-to-t from-muted/90 to-transparent"
+              isUser ? "bg-gradient-to-t from-primary to-transparent" : "bg-gradient-to-t from-muted to-transparent"
             }`}>
               <button
                 onClick={() => setExpanded(true)}
-                className={`text-[10px] font-medium px-3 py-0.5 rounded-full border transition-colors ${
+                className={`text-[10px] font-semibold px-3 py-1 rounded-full border shadow-sm transition-colors ${
                   isUser
-                    ? "border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/10"
-                    : "border-border text-muted-foreground hover:bg-muted"
+                    ? "bg-primary-foreground/15 border-primary-foreground/25 text-primary-foreground hover:bg-primary-foreground/25"
+                    : "bg-background border-border text-foreground hover:bg-muted"
                 }`}
               >
                 Read more ↓
@@ -294,11 +295,11 @@ const MessageComponent: React.FC<MessageComponentProps & {
           )}
         </div>
 
-        {/* Show less — appears below the bubble when expanded */}
+        {/* Show less */}
         {overflows && expanded && (
           <button
             onClick={() => setExpanded(false)}
-            className="mt-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors px-1"
+            className="mt-1.5 self-center text-[10px] font-semibold bg-muted border border-border text-muted-foreground hover:text-foreground transition-colors px-3 py-1 rounded-full shadow-sm"
           >
             Show less ↑
           </button>
