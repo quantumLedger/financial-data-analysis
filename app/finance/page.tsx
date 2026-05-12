@@ -136,8 +136,9 @@ interface FileUpload {
 }
 
 const models: Model[] = [
-  { id: "claude-sonnet-4-5-20250929", name: "IdentifyAI's CH" },
-  { id: "claude-haiku-4-5-20251001", name: "IdentifyAI's SH" },
+  { id: "claude-opus-4-7", name: "Inspolio's Opus 4.7" },
+  { id: "claude-sonnet-4-6", name: "Inspolio's Sonnet 4.6" },
+  { id: "claude-haiku-4-5-20251001", name: "Inspolio's Haiku 4.5" },
 ];
 
 interface APIResponse {
@@ -348,9 +349,7 @@ export default function AIChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(
-    "claude-sonnet-4-5-20250929"
-  );
+  const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-6");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chartEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
