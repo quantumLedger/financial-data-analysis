@@ -247,16 +247,10 @@ const MessageComponent: React.FC<MessageComponentProps & {
       </div>
 
       {overflows && !expanded && (
-        <div className={`absolute bottom-0 left-0 right-0 h-14 flex items-end justify-center pb-2 rounded-b-lg ${
-          isUser ? "bg-gradient-to-t from-primary to-transparent" : "bg-gradient-to-t from-muted to-transparent"
-        }`}>
+        <div className="absolute bottom-0 left-0 right-0 h-14 flex items-end justify-center pb-2 rounded-b-lg bg-gradient-to-t from-white/80 to-transparent">
           <button
             onClick={() => setExpanded(true)}
-            className={`text-[10px] font-semibold px-3 py-1 rounded-full border shadow-sm transition-colors ${
-              isUser
-                ? "bg-primary-foreground/15 border-primary-foreground/25 text-primary-foreground hover:bg-primary-foreground/25"
-                : "bg-background border-border text-foreground hover:bg-muted"
-            }`}
+            className="text-[10px] font-semibold px-3 py-1 rounded-full border border-black bg-black text-white hover:bg-neutral-800 shadow-sm transition-colors"
           >
             Read more ↓
           </button>
@@ -290,7 +284,7 @@ const MessageComponent: React.FC<MessageComponentProps & {
             {overflows && expanded && (
               <button
                 onClick={() => setExpanded(false)}
-                className="mt-1.5 self-center text-[10px] font-semibold bg-muted border border-border text-muted-foreground hover:text-foreground transition-colors px-3 py-1 rounded-full shadow-sm"
+                className="mt-1.5 self-center text-[10px] font-semibold bg-black border border-black text-white hover:bg-neutral-800 transition-colors px-3 py-1 rounded-full shadow-sm"
               >
                 Show less ↑
               </button>
@@ -323,7 +317,7 @@ const MessageComponent: React.FC<MessageComponentProps & {
         {overflows && expanded && (
           <button
             onClick={() => setExpanded(false)}
-            className="mt-1.5 self-center text-[10px] font-semibold bg-muted border border-border text-muted-foreground hover:text-foreground transition-colors px-3 py-1 rounded-full shadow-sm"
+            className="mt-1.5 self-center text-[10px] font-semibold bg-black border border-black text-white hover:bg-neutral-800 transition-colors px-3 py-1 rounded-full shadow-sm"
           >
             Show less ↑
           </button>
@@ -1726,9 +1720,24 @@ export default function AIChat() {
             </div>
           )}
 
-          {/* Input shell — clean frosted blur, no colour animation */}
-          <div className="rounded-lg">
-          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white dark:bg-neutral-900 rounded-lg shadow-sm border border-border/50">
+          {/* Input shell — always white, with loading overlay */}
+          <div className="rounded-lg relative">
+          {/* Loading overlay: very light grey blur over the whole input shell */}
+          {(isLoading || isUploading) && (
+            <div className="absolute inset-0 z-10 rounded-lg bg-white/80 backdrop-blur-[2px] flex items-center justify-center">
+              <Button
+                type="button"
+                onClick={handleAbort}
+                size="sm"
+                className="h-8 px-4 rounded-full bg-black hover:bg-neutral-800 text-white text-[11px] font-semibold flex items-center gap-1.5 shadow-md"
+                title="Stop generating"
+              >
+                <Square className="h-3 w-3 fill-current" />
+                Stop
+              </Button>
+            </div>
+          )}
+          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white rounded-lg shadow-sm border border-border/50">
 
             <Button
               type="button"
