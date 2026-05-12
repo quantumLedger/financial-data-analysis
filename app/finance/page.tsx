@@ -1728,7 +1728,7 @@ export default function AIChat() {
 
           {/* Input shell — clean frosted blur, no colour animation */}
           <div className="rounded-lg">
-          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-md rounded-lg shadow-sm border border-border/50">
+          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white dark:bg-neutral-900 rounded-lg shadow-sm border border-border/50">
 
             <Button
               type="button"
