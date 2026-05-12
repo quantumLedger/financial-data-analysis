@@ -222,80 +222,104 @@ const MessageComponent: React.FC<MessageComponentProps & {
     return () => ro.disconnect();
   }, [message.content]);
 
-  return (
-    <div className={`flex items-start gap-2.5 ${
-      isUser ? "flex-row-reverse" : "flex-row"
-    } ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
-
-      {/* Avatar */}
-      <div className="flex-shrink-0 mt-0.5">
-        {isUser ? (
-          <div className="w-7 h-7 rounded-full bg-primary/10 border flex items-center justify-center">
-            <User className="w-3.5 h-3.5 text-primary" />
+  /* ── shared bubble + expand/collapse ── */
+  const bubble = (
+    <div className="relative w-full">
+      <div
+        ref={bubbleInnerRef}
+        style={{ maxHeight: expanded ? undefined : MAX_MSG_HEIGHT }}
+        className={`overflow-hidden px-3 py-2.5 rounded-lg text-[12px] leading-relaxed ${
+          isUser
+            ? "bg-primary text-primary-foreground"
+            : "bg-muted/60 border backdrop-blur-sm"
+        }`}
+      >
+        {isThinking ? (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-current flex-shrink-0" />
+            <span className="text-[11px]">{message.status ?? "Thinking…"}</span>
           </div>
         ) : (
-          <Avatar className="w-7 h-7 border">
-            <AvatarImage src="/ant-logo.svg" alt="AI" />
-            <AvatarFallback>AI</AvatarFallback>
-          </Avatar>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+            {message.content}
+          </ReactMarkdown>
         )}
       </div>
 
-      {/* Content — user right-aligned, assistant left-aligned */}
-      <div className={`min-w-0 ${isUser ? "items-end flex flex-col max-w-[78%]" : "flex-1 flex flex-col"}`}>
-        {/* Name + time */}
-        <div className={`flex items-center gap-2 mb-1 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
-          <span className="text-[11px] font-semibold text-foreground">
-            {isUser ? "You" : "Assistant"}
-          </span>
+      {overflows && !expanded && (
+        <div className={`absolute bottom-0 left-0 right-0 h-14 flex items-end justify-center pb-2 rounded-b-lg ${
+          isUser ? "bg-gradient-to-t from-primary to-transparent" : "bg-gradient-to-t from-muted to-transparent"
+        }`}>
+          <button
+            onClick={() => setExpanded(true)}
+            className={`text-[10px] font-semibold px-3 py-1 rounded-full border shadow-sm transition-colors ${
+              isUser
+                ? "bg-primary-foreground/15 border-primary-foreground/25 text-primary-foreground hover:bg-primary-foreground/25"
+                : "bg-background border-border text-foreground hover:bg-muted"
+            }`}
+          >
+            Read more ↓
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  if (isUser) {
+    return (
+      /* User — whole block pushed right */
+      <div className={`flex justify-end ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
+        <div className="flex items-start gap-2.5 max-w-[78%]">
+          {/* Avatar on the LEFT of the bubble */}
+          <div className="flex-shrink-0 mt-5">
+            <div className="w-7 h-7 rounded-full bg-primary/10 border flex items-center justify-center">
+              <User className="w-3.5 h-3.5 text-primary" />
+            </div>
+          </div>
+
+          {/* Content column */}
+          <div className="flex flex-col min-w-0 flex-1">
+            {/* Header: You (left) · time (right) */}
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-foreground">You</span>
+              {!isThinking && (
+                <span className="text-[9px] text-muted-foreground/55">{timeStr}</span>
+              )}
+            </div>
+            {bubble}
+            {overflows && expanded && (
+              <button
+                onClick={() => setExpanded(false)}
+                className="mt-1.5 self-center text-[10px] font-semibold bg-muted border border-border text-muted-foreground hover:text-foreground transition-colors px-3 py-1 rounded-full shadow-sm"
+              >
+                Show less ↑
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* Assistant — left-aligned */
+  return (
+    <div className={`flex items-start gap-2.5 ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
+      <div className="flex-shrink-0 mt-5">
+        <Avatar className="w-7 h-7 border">
+          <AvatarImage src="/ant-logo.svg" alt="AI" />
+          <AvatarFallback>AI</AvatarFallback>
+        </Avatar>
+      </div>
+
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header: Assistant (left) · time (right) */}
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[11px] font-semibold text-foreground">Assistant</span>
           {!isThinking && (
             <span className="text-[9px] text-muted-foreground/55">{timeStr}</span>
           )}
         </div>
-
-        {/* Bubble with height cap */}
-        <div className="relative w-full">
-          <div
-            ref={bubbleInnerRef}
-            style={{ maxHeight: expanded ? undefined : MAX_MSG_HEIGHT }}
-            className={`overflow-hidden px-3 py-2.5 rounded-lg text-[12px] leading-relaxed ${
-              isUser
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted/60 border backdrop-blur-sm"
-            }`}
-          >
-            {isThinking ? (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-current flex-shrink-0" />
-                <span className="text-[11px]">{message.status ?? "Thinking…"}</span>
-              </div>
-            ) : (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                {message.content}
-              </ReactMarkdown>
-            )}
-          </div>
-
-          {/* Fade + Read more */}
-          {overflows && !expanded && (
-            <div className={`absolute bottom-0 left-0 right-0 h-14 flex items-end justify-center pb-2 rounded-b-lg ${
-              isUser ? "bg-gradient-to-t from-primary to-transparent" : "bg-gradient-to-t from-muted to-transparent"
-            }`}>
-              <button
-                onClick={() => setExpanded(true)}
-                className={`text-[10px] font-semibold px-3 py-1 rounded-full border shadow-sm transition-colors ${
-                  isUser
-                    ? "bg-primary-foreground/15 border-primary-foreground/25 text-primary-foreground hover:bg-primary-foreground/25"
-                    : "bg-background border-border text-foreground hover:bg-muted"
-                }`}
-              >
-                Read more ↓
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Show less */}
+        {bubble}
         {overflows && expanded && (
           <button
             onClick={() => setExpanded(false)}
