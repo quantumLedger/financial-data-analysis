@@ -269,7 +269,7 @@ const MessageComponent: React.FC<MessageComponentProps & {
     return (
       /* User — whole block pushed right */
       <div className={`flex justify-end ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
-        <div className="flex items-start gap-2.5 max-w-[78%]">
+        <div className="flex items-start gap-2.5 w-[55%]">
           {/* Avatar on the LEFT of the bubble */}
           <div className="flex-shrink-0 mt-5">
             <div className="w-7 h-7 rounded-full bg-primary/10 border flex items-center justify-center">
