@@ -4,12 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npx dotenv -e .env.prod -- next build",
-    "start": "npx dotenv -e .env.prod -- next start",
-    "start:prod": "npx dotenv -e .env.prod -- next start",
+    "build": "node --env-file=.env.prod node_modules/.bin/next build",
+    "start": "node --env-file=.env.prod node_modules/.bin/next start",
+    "start:prod": "node --env-file=.env.prod node_modules/.bin/next start",
     "lint": "next lint",
-    "postinstall": "npx dotenv -e .env.prod -- prisma generate || true",
-    "db:migrate:prod": "npx dotenv -e .env.prod -- prisma migrate deploy",
+    "postinstall": "node --env-file=.env.prod node_modules/.bin/prisma generate || true",
+    "db:migrate:prod": "node --env-file=.env.prod node_modules/.bin/prisma migrate deploy",
     "prod": "npm run db:migrate:prod && npm run build && npm run start"
   },
   "dependencies": {
