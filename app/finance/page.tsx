@@ -272,8 +272,8 @@ const MessageComponent: React.FC<MessageComponentProps & {
         <div className="flex items-start gap-2.5 w-[55%]">
           {/* Avatar on the LEFT of the bubble */}
           <div className="flex-shrink-0 mt-5">
-            <div className="w-7 h-7 rounded-full bg-primary/10 border flex items-center justify-center">
-              <User className="w-3.5 h-3.5 text-primary" />
+            <div className="w-7 h-7 rounded-full bg-black border border-black flex items-center justify-center">
+              <User className="w-3.5 h-3.5 text-white" />
             </div>
           </div>
 
