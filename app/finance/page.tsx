@@ -1449,7 +1449,7 @@ export default function AIChat() {
                               key={i}
                               onClick={() => !isLoading && handleFollowUp(q)}
                               disabled={isLoading}
-                              className="text-[11px] border rounded-[2px] px-3 py-1 transition-colors text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted"
+                              className="text-[11px] border rounded-lg px-3 py-1 transition-colors text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted"
                             >
                               {q}
                             </button>
@@ -1590,8 +1590,8 @@ export default function AIChat() {
           )}
 
           {/* Gradient border shell */}
-          <div className={`rounded-[2px] transition-all ${isLoading || isUploading ? "animate-gradient-border p-[1.5px]" : ""}`}>
-          <div className={`flex items-center gap-1.5 px-2 py-1.5 bg-background rounded-[2px] shadow-lg border ${isLoading || isUploading ? "border-transparent" : ""}`}>
+          <div className={`rounded-lg transition-all ${isLoading || isUploading ? "animate-gradient-border p-[1.5px]" : ""}`}>
+          <div className={`flex items-center gap-1.5 px-2 py-1.5 bg-background rounded-lg shadow-lg border ${isLoading || isUploading ? "border-transparent" : ""}`}>
 
             <Button
               type="button"
