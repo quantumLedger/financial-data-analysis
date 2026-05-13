@@ -1332,7 +1332,7 @@ export default function AIChat() {
   };
 
   return (
-    <div className="flex flex-col h-screen" style={{ position: 'relative', overflow: 'visible' }}>
+    <div className="flex flex-col h-screen overflow-hidden" style={{ position: 'relative' }}>
       <TopNavBar
         features={{
           showDomainSelector: false,
@@ -1343,7 +1343,7 @@ export default function AIChat() {
 
       <div 
         ref={resizableContainerRef}
-        className="flex-1 flex bg-background mt-0 pt-0 h-[calc(100vh-4rem)] resizable-container relative"
+        className="flex-1 flex bg-background mt-0 pt-0 min-h-0 resizable-container relative"
       >
         <Card 
           className="flex flex-col h-full transition-all mr-2 relative overflow-hidden"
@@ -1383,8 +1383,8 @@ export default function AIChat() {
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div>
-                  <CardTitle className="text-[12px]">Financial Assistant</CardTitle>
-                  <CardDescription className="text-[11px]">
+                  <CardTitle className="text-[16px]">Financial Assistant</CardTitle>
+                  <CardDescription className="text-[15px]">
                     Powered by weidentify.ai
                   </CardDescription>
                 </div>
