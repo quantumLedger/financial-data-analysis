@@ -127,6 +127,8 @@ interface ConversationSummary {
 type Model = {
   id: string;
   name: string;
+  /** One-line hint for when to use this model */
+  description: string;
 };
 
 interface FileUpload {
@@ -138,8 +140,21 @@ interface FileUpload {
 }
 
 const models: Model[] = [
-  { id: "claude-sonnet-4-5-20250929", name: "IdentifyAI's CH" },
-  { id: "claude-haiku-4-5-20251001", name: "IdentifyAI's SH" },
+  {
+    id: "claude-opus-4-7",
+    name: "Inspolio's Opus 4.7",
+    description: "Highest capability for the hardest analysis; slower and higher cost.",
+  },
+  {
+    id: "claude-sonnet-4-6",
+    name: "Inspolio's Sonnet 4.6",
+    description: "Best default—strong quality with fast responses for most finance work.",
+  },
+  {
+    id: "claude-haiku-4-5-20251001",
+    name: "Inspolio's Haiku 4.5",
+    description: "Fastest answers for quick questions, edits, and lighter tasks.",
+  },
 ];
 
 enum PORTFOLIO_TYPE {
@@ -454,9 +469,7 @@ export default function AIChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(
-    "claude-sonnet-4-5-20250929"
-  );
+  const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-6");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chartEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1406,18 +1419,34 @@ export default function AIChat() {
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="h-8 text-[11px]">
+                    <Button
+                      variant="outline"
+                      className="h-8 text-[11px]"
+                      title={models.find((m) => m.id === selectedModel)?.description}
+                    >
                       {models.find((m) => m.id === selectedModel)?.name}
                       <ChevronDown className="ml-2 h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent className="z-[200]">
+                  <DropdownMenuContent className="z-[200] w-[min(320px,calc(100vw-2rem))]">
                     {models.map((model) => (
                       <DropdownMenuItem
                         key={model.id}
                         onSelect={() => setSelectedModel(model.id)}
+                        className={`flex flex-col items-start gap-0.5 py-2 cursor-pointer ${
+                          model.id === selectedModel ? "bg-muted" : ""
+                        }`}
                       >
-                        {model.name}
+                        <span
+                          className={`text-[11px] leading-tight ${
+                            model.id === selectedModel ? "font-semibold" : "font-medium"
+                          }`}
+                        >
+                          {model.name}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground leading-snug">
+                          {model.description}
+                        </span>
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuContent>
