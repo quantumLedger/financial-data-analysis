@@ -1766,7 +1766,7 @@ export default function AIChat() {
               </Button>
             </div>
           )}
-          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white rounded-lg shadow-sm border border-border/50">
+          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white rounded-lg shadow-sm border border-neutral-800">
 
             <Button
               type="button"
@@ -1824,27 +1824,15 @@ export default function AIChat() {
               />
             </div>
 
-            {isLoading ? (
-              <Button
-                type="button"
-                onClick={handleAbort}
-                size="icon"
-                className="h-8 w-8 rounded-full shrink-0 bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-                title="Stop generating"
-              >
-                <Square className="h-3.5 w-3.5 fill-current" />
-              </Button>
-            ) : (
-              <Button
-                type="submit"
-                size="icon"
-                disabled={isUploading || (!input.trim() && !currentUpload)}
-                className="h-8 w-8 rounded-full shrink-0"
-                title="Send"
-              >
-                <Send className="h-3.5 w-3.5" />
-              </Button>
-            )}
+            <Button
+              type="submit"
+              size="icon"
+              disabled={isLoading || isUploading || (!input.trim() && !currentUpload)}
+              className="h-8 w-8 rounded-full shrink-0"
+              title="Send"
+            >
+              <Send className="h-3.5 w-3.5" />
+            </Button>
           </div>{/* end flex row */}
           </div>{/* end gradient shell */}
 
