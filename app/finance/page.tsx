@@ -487,6 +487,9 @@ export default function AIChat() {
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const hasAutoInitialized = useRef(false);
+  /** Synchronous guard that prevents a second request starting while one is in flight,
+   *  even if React hasn't flushed the isLoading state update yet. */
+  const isInFlightRef = useRef(false);
 
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -663,7 +666,8 @@ export default function AIChat() {
 
     // Mark as initialized to prevent multiple calls
     hasAutoInitialized.current = true;
-    
+    if (isInFlightRef.current) return;
+
     // Trigger initialization automatically
     const autoInit = async () => {
       const userMsg: Message = {
@@ -679,6 +683,7 @@ export default function AIChat() {
         timestamp: new Date().toISOString(),
       };
       setMessages([userMsg, thinkingMsg]);
+      isInFlightRef.current = true;
       setIsLoading(true);
       const msgs = [{ role: "user", content: initializePromptHidden }];
       const convId = await ensureConversation(initializePromptDisplay);
@@ -705,7 +710,17 @@ export default function AIChat() {
         });
         hasAutoInitialized.current = false;
       } finally {
+        isInFlightRef.current = false;
         setIsLoading(false);
+        // Clear any message that got stuck in the "thinking" placeholder
+        setMessages((prev) => {
+          const out = [...prev];
+          const last = out[out.length - 1];
+          if (last?.role === "assistant" && last.content === "thinking") {
+            out[out.length - 1] = { ...last, status: undefined, content: "_(No response received. Please try again.)_" };
+          }
+          return out;
+        });
       }
     };
 
@@ -1154,7 +1169,8 @@ export default function AIChat() {
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!input.trim() && !currentUpload) return;
-    if (isLoading || isUploading) return;
+    if (isLoading || isUploading || isInFlightRef.current) return;
+    isInFlightRef.current = true;
     setIsScrollLocked(true);
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -1230,8 +1246,18 @@ export default function AIChat() {
         return newMessages;
       });
     } finally {
+      isInFlightRef.current = false;
       setIsLoading(false);
       setIsScrollLocked(false);
+      // Clear any message that got stuck in the "thinking" placeholder
+      setMessages((prev) => {
+        const out = [...prev];
+        const last = out[out.length - 1];
+        if (last?.role === "assistant" && last.content === "thinking") {
+          out[out.length - 1] = { ...last, status: undefined, content: "_(No response received. Please try again.)_" };
+        }
+        return out;
+      });
       requestAnimationFrame(() => {
         messagesEndRef.current?.scrollIntoView({
           behavior: "smooth",
@@ -1242,7 +1268,7 @@ export default function AIChat() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (isLoading || isUploading) return;
+    if (isLoading || isUploading || isInFlightRef.current) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (input.trim() || currentUpload) {
@@ -1289,7 +1315,7 @@ export default function AIChat() {
       });
       return;
     }
-    if (isLoading) return;
+    if (isLoading || isInFlightRef.current) return;
     const userMsg: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -1303,6 +1329,7 @@ export default function AIChat() {
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg, thinkingMsg]);
+    isInFlightRef.current = true;
     setIsLoading(true);
     const msgs = [{ role: "user", content: initializePromptHidden }];
     const convId = await ensureConversation(initializePromptDisplay);
@@ -1327,7 +1354,17 @@ export default function AIChat() {
         return out;
       });
     } finally {
+      isInFlightRef.current = false;
       setIsLoading(false);
+      // Clear any message that got stuck in the "thinking" placeholder
+      setMessages((prev) => {
+        const out = [...prev];
+        const last = out[out.length - 1];
+        if (last?.role === "assistant" && last.content === "thinking") {
+          out[out.length - 1] = { ...last, status: undefined, content: "_(No response received. Please try again.)_" };
+        }
+        return out;
+      });
     }
   };
 
@@ -1343,7 +1380,7 @@ export default function AIChat() {
 
       <div 
         ref={resizableContainerRef}
-        className="flex-1 flex bg-background mt-0 pt-0 min-h-0 resizable-container relative"
+        className="flex-1 flex bg-background mt-0 pt-2 min-h-0 resizable-container relative px-3 pb-2"
       >
         <Card 
           className="flex flex-col h-full transition-all mr-2 relative overflow-hidden"
@@ -1384,7 +1421,7 @@ export default function AIChat() {
               <div className="flex items-center space-x-3">
                 <div>
                   <CardTitle className="text-[16px]">Financial Assistant</CardTitle>
-                  <CardDescription className="text-[15px]">
+                  <CardDescription className="text-[13px]">
                     Powered by weidentify.ai
                   </CardDescription>
                 </div>
