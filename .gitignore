@@ -25,12 +25,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
+# local env files — KEEP IGNORED. Never commit production secrets.
 .env
-.env*.local
-.env.prod
 .env.local
-.env
+.env.*.local
+.env.prod
 
 # vercel
 .vercel
@@ -42,5 +41,6 @@ next-env.d.ts
 # batch files (optional - uncomment if you don't want to commit them)
 # *.bat
 
-package-lock.json
+# NOTE: package-lock.json IS committed on dev-secure for reproducible builds
+# in Dockerfile.prod (`npm ci`). Do not re-add it to .gitignore.
 /lib/generated/prisma

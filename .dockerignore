@@ -1,0 +1,47 @@
+.git
+.gitignore
+.github
+.idea
+.vscode
+.DS_Store
+
+# JS / build artefacts
+node_modules
+.next
+out
+build
+dist
+coverage
+*.tsbuildinfo
+.next-env.d.ts
+
+# local env / secrets — must NEVER end up in an image
+.env
+.env.*
+*.pem
+*.key
+.env.prod
+.env.local
+
+# misc
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.cache
+
+# editor / docs
+*.md
+docs/
+.claude/
+
+# scripts not needed in runtime
+scripts/
+
+# tests
+tests/
+__tests__/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx

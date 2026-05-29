@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ChartData, TableData, MemoData, NarrativeData } from "@/types/chart";
 import { retryWithBackoff } from "@/lib/retry";
+import { maybeAlertLlmQuotaForError } from "@/lib/llmQuotaAlarm";
+import { internalApiKeyHeader } from "@/lib/internalApiKey";
 
 // ─── Portfolio data fetch ────────────────────────────────────────────────────
 
@@ -81,11 +83,17 @@ async function callFinsightAPI(toolName: string, input: any, userId: number): Pr
   const BASE = process.env.FINSIGHT_AI_URL;
   if (!BASE) throw new Error("FINSIGHT_AI_URL not configured");
 
+  // Shared header: JSON content-type + X-Internal-Key (when configured).
+  // Header is empty until INTERNAL_API_KEY is set on both ends, so the
+  // rollout is non-breaking.
+  const jsonHeaders = { "Content-Type": "application/json", ...internalApiKeyHeader() };
+  const getHeaders = { ...internalApiKeyHeader() };
+
   switch (toolName) {
     case "analyze_sec_filing": {
       const res = await fetch(`${BASE}/api/sec-filing/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders,
         body: JSON.stringify({ user_id: userId, ticker: input.ticker, filing_type: input.filing_type ?? "10-K" }),
         signal: AbortSignal.timeout(45000),
       });
@@ -96,7 +104,7 @@ async function callFinsightAPI(toolName: string, input: any, userId: number): Pr
     case "get_earnings_flash": {
       const res = await fetch(`${BASE}/api/earnings-intelligence/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders,
         body: JSON.stringify({ user_id: userId, ticker: input.ticker }),
         signal: AbortSignal.timeout(30000),
       });
@@ -107,7 +115,7 @@ async function callFinsightAPI(toolName: string, input: any, userId: number): Pr
     case "find_deal_comps": {
       const res = await fetch(`${BASE}/api/deal-comps/search`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders,
         body: JSON.stringify({ user_id: userId, target_ticker: input.ticker, search_name: input.search_name }),
         signal: AbortSignal.timeout(45000),
       });
@@ -118,7 +126,7 @@ async function callFinsightAPI(toolName: string, input: any, userId: number): Pr
     case "generate_pitch_section": {
       const res = await fetch(`${BASE}/api/pitch-book/generate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders,
         body: JSON.stringify({
           user_id: userId,
           section_type: input.section_type,
@@ -135,7 +143,7 @@ async function callFinsightAPI(toolName: string, input: any, userId: number): Pr
     case "generate_pre_meeting_brief": {
       const res = await fetch(`${BASE}/api/pre-meeting-brief/generate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders,
         body: JSON.stringify({ user_id: userId, ...input }),
         signal: AbortSignal.timeout(30000),
       });
@@ -145,6 +153,7 @@ async function callFinsightAPI(toolName: string, input: any, userId: number): Pr
 
     case "get_morning_brief": {
       const res = await fetch(`${BASE}/api/morning-brief?user_id=${userId}`, {
+        headers: getHeaders,
         signal: AbortSignal.timeout(60000),
       });
       if (!res.ok) throw new Error(`Morning brief API ${res.status}`);
@@ -155,7 +164,7 @@ async function callFinsightAPI(toolName: string, input: any, userId: number): Pr
       // Step 1: initiate
       const initRes = await fetch(`${BASE}/portfolio-analysis/initiate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders,
         body: JSON.stringify({ mapping_id: input.mapping_id }),
         signal: AbortSignal.timeout(15000),
       });
@@ -166,6 +175,7 @@ async function callFinsightAPI(toolName: string, input: any, userId: number): Pr
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 3000));
         const statusRes = await fetch(`${BASE}/portfolio-analysis/${input.mapping_id}/status`, {
+          headers: getHeaders,
           signal: AbortSignal.timeout(10000),
         });
         if (!statusRes.ok) continue;
@@ -634,7 +644,22 @@ Focus on clear, actionable financial insights.`;
             });
 
             claudeStream.on("text", (text: string) => send({ type: "text", text }));
-            const message = await claudeStream.finalMessage();
+            let message: any;
+            try {
+              message = await claudeStream.finalMessage();
+            } catch (err) {
+              // Detect Anthropic quota / billing exhaustion ("credit balance is
+              // too low", HTTP 400 / 402 / 403). Fire a best-effort ops alert
+              // before re-throwing so the surrounding error handler still runs.
+              await maybeAlertLlmQuotaForError({
+                provider: "anthropic",
+                error: err,
+                requestSummary: typeof currentMessages?.[0]?.content === "string"
+                  ? (currentMessages[0].content as string).slice(0, 200)
+                  : undefined,
+              });
+              throw err;
+            }
 
             const toolBlocks = message.content.filter((c) => c.type === "tool_use") as any[];
             const hasFinsightCalls = toolBlocks.some((b) => FINSIGHT_TOOL_NAMES.has(b.name));

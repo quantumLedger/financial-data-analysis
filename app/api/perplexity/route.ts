@@ -2,6 +2,7 @@
 import { NextRequest } from "next/server";
 import { PERPLEXITY_API_KEY } from "@/lib/config";
 import { retryWithBackoff } from "@/lib/retry";
+import { maybeAlertLlmQuota } from "@/lib/llmQuotaAlarm";
 
 // Use Node.js runtime for better API compatibility
 export const runtime = "nodejs";
@@ -91,21 +92,34 @@ export async function POST(req: NextRequest) {
           const errorText = await res.text().catch(() => "Unknown error");
           const error: any = new Error(`Perplexity API error: ${res.status} - ${errorText}`);
           error.status = res.status;
-          
+          // Surface the raw body to downstream quota detection.
+          error.responseText = errorText;
+
+          // Detect quota / billing exhaustion (Perplexity returns 401 with
+          // "insufficient_quota" when the account is out of credit). Fire a
+          // best-effort ops alert and stop retrying — retrying when the
+          // account is empty just spams the provider.
+          await maybeAlertLlmQuota({
+            provider: "perplexity",
+            statusCode: res.status,
+            body: errorText,
+            requestSummary: query,
+          });
+
           // Don't retry on 401 (auth error)
           if (res.status === 401) {
             throw error;
           }
-          
+
           // Retry on 429 (rate limit) and 5xx (server errors)
           if (res.status === 429 || res.status >= 500) {
             throw error;
           }
-          
+
           // For other 4xx errors, throw without retry
           throw error;
         }
-        
+
         return res;
       }, 3, 1000, 10000);
     } catch (fetchError: any) {

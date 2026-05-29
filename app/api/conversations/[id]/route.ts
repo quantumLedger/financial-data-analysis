@@ -21,7 +21,7 @@ export async function GET(
 
     return NextResponse.json(conversation);
   } catch (err) {
-    console.error("❌ GET /api/conversations/[id] error:", err);
-    return NextResponse.json({ error: "Failed to load conversation" }, { status: 500 });
+    console.error("GET /api/conversations/[id] error:", err);
+    return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }

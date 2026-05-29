@@ -18,8 +18,11 @@ export async function GET(req: NextRequest) {
     });
     return NextResponse.json(conversations);
   } catch (err) {
-    console.error("❌ GET /api/conversations error:", err);
-    return NextResponse.json({ error: "Failed to load conversations" }, { status: 500 });
+    // Log server-side, surface a generic error to the client — never echo
+    // the raw Prisma exception (it contains schema names, SQL fragments,
+    // and sometimes parameter values).
+    console.error("GET /api/conversations error:", err);
+    return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }
 
@@ -42,7 +45,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(conversation, { status: 201 });
   } catch (err) {
-    console.error("❌ POST /api/conversations error:", err);
-    return NextResponse.json({ error: "Failed to create conversation" }, { status: 500 });
+    console.error("POST /api/conversations error:", err);
+    return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }

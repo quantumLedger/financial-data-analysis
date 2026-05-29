@@ -1,0 +1,62 @@
+############################
+# Stage 1: deps
+############################
+FROM node:20-alpine AS deps
+WORKDIR /app
+
+# Reproducible install — copy lockfile and use `npm ci`. (Make sure
+# package-lock.json is committed; the .gitignore in dev-secure was updated
+# to no longer ignore it.)
+COPY package.json package-lock.json* ./
+RUN npm ci --no-audit --no-fund
+
+
+############################
+# Stage 2: build
+############################
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Prisma client generation needs the schema but NOT a live DB.
+RUN npx prisma generate
+
+# Build the Next.js standalone server. Output goes to .next/standalone
+# (set by next.config.mjs -> output: "standalone").
+RUN npm run build:prod
+
+
+############################
+# Stage 3: runtime
+############################
+FROM node:20-alpine AS runtime
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3001 \
+    HOSTNAME=0.0.0.0
+
+# curl for HEALTHCHECK only.
+RUN apk add --no-cache curl && \
+    addgroup --system --gid 1001 nodejs && \
+    adduser  --system --uid 1001 --ingroup nodejs nextjs
+
+# Standalone Next.js server (everything it needs is inlined).
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static    ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public          ./public
+
+USER nextjs
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl --fail --silent --show-error http://127.0.0.1:3001/api/health || exit 1
+
+# Standalone server entrypoint. Listens on HOSTNAME:PORT.
+CMD ["node", "server.js"]
