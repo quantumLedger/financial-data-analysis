@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node --env-file=.env.prod node_modules/.bin/next build",
+    "build": "next build",
     "build:prod": "next build",
-    "start": "node --env-file=.env.prod node_modules/.bin/next start",
+    "start": "next start",
     "start:prod": "next start",
     "lint": "next lint",
     "postinstall": "prisma generate || true",
