@@ -11,7 +11,6 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Send,
   Square,
@@ -25,7 +24,6 @@ import {
   Loader2,
   FileText,
   FileDown,
-  User,
 } from "lucide-react";
 import FilePreview from "@/components/FilePreview";
 import { ChartRenderer } from "@/components/ChartRenderer";
@@ -60,36 +58,36 @@ const mdComponents: Components = {
   h4: ({ node, ...props }) => <h4 className="text-[14px] font-medium mt-2 mb-1" {...props} />,
   h5: ({ node, ...props }) => <h5 className="text-[14px] font-medium mt-2 mb-1" {...props} />,
   h6: ({ node, ...props }) => <h6 className="text-[14px] font-medium mt-2 mb-1" {...props} />,
-  // Content: 12px
-  p: ({ node, ...props }) => <p className="text-[12px] my-1" {...props} />,
-  ul: ({ node, ...props }) => <ul className="list-disc pl-5 my-2 text-[12px]" {...props} />,
-  ol: ({ node, ...props }) => <ol className="list-decimal pl-5 my-2 text-[12px]" {...props} />,
-  li: ({ node, ...props }) => <li className="text-[12px]" {...props} />,
+  // Content: 13.5px (matches fin-sight-front chat bot body)
+  p: ({ node, ...props }) => <p className="text-[13.5px] my-1" {...props} />,
+  ul: ({ node, ...props }) => <ul className="list-disc pl-5 my-2 text-[13.5px]" {...props} />,
+  ol: ({ node, ...props }) => <ol className="list-decimal pl-5 my-2 text-[13.5px]" {...props} />,
+  li: ({ node, ...props }) => <li className="text-[13.5px]" {...props} />,
   table: ({ node, ...props }) => (
     <div className="overflow-x-auto my-3">
-      <table className="w-full border-collapse text-[12px]" {...props} />
+      <table className="w-full border-collapse text-[13.5px]" {...props} />
     </div>
   ),
   th: ({ node, ...props }) => (
-    <th className="border px-2 py-1 text-left bg-background/50 text-[12px] font-medium" {...props} />
+    <th className="border px-2 py-1 text-left bg-background/50 text-[13.5px] font-medium" {...props} />
   ),
   td: ({ node, ...props }) => (
-    <td className="border px-2 py-1 align-top text-[12px]" {...props} />
+    <td className="border px-2 py-1 align-top text-[13.5px]" {...props} />
   ),
   blockquote: ({ node, ...props }) => (
-    <blockquote className="border-l-4 pl-3 italic text-[12px] opacity-90 my-2" {...props} />
+    <blockquote className="border-l-4 pl-3 italic text-[13.5px] opacity-90 my-2" {...props} />
   ),
   // @ts-ignore — react-markdown passes `inline`; TS inference complains
   code({ node, inline, className, children, ...props }) {
     if (inline) {
       return (
-        <code className="bg-background/50 px-1 py-0.5 rounded text-[12px]" {...props}>
+        <code className="bg-background/50 px-1 py-0.5 rounded text-[11px]" {...props}>
           {children}
         </code>
       );
     }
     return (
-  <pre {...(props as React.HTMLAttributes<HTMLPreElement>)} className="bg-background/50 p-3 rounded overflow-auto my-2 text-[12px]">
+  <pre {...(props as React.HTMLAttributes<HTMLPreElement>)} className="bg-background/50 p-3 rounded overflow-auto my-2 text-[11px]">
         <code className={className}>{children}</code>
       </pre>
     );
@@ -166,6 +164,9 @@ import { WEIDENTIFY_API_URL } from '@/lib/config';
 
 const API_URL = WEIDENTIFY_API_URL;
 
+// Goes through our own /api/portfolio/combined-csvs BFF so the X-Internal-Key
+// shared secret stays server-side. The browser must never touch
+// apis.weidentify.ai directly \u2014 it has neither the secret nor a Cognito token.
 async function fetchCombinedCSVsByFirm(
   clientId: string,
   investmentBankerId: string,
@@ -178,7 +179,7 @@ async function fetchCombinedCSVsByFirm(
   formData.append("firm_name", firmName);
   formData.append("client_id", clientId);
   const response = await axios.post(
-    `${API_URL}/api/fetch-combined-csvs-by-firm`,
+    `/api/portfolio/combined-csvs`,
     formData,
     { headers: { "Content-Type": "multipart/form-data" } }
   );
@@ -243,10 +244,10 @@ const MessageComponent: React.FC<MessageComponentProps & {
       <div
         ref={bubbleInnerRef}
         style={{ maxHeight: expanded ? undefined : MAX_MSG_HEIGHT }}
-        className={`overflow-hidden px-3 py-2.5 rounded-lg text-[12px] leading-relaxed ${
+        className={`overflow-hidden px-3 py-2.5 rounded-lg leading-relaxed ${
           isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted/60 border backdrop-blur-sm"
+            ? "bg-primary text-primary-foreground text-[11px]"
+            : "bg-muted/60 border backdrop-blur-sm text-[13.5px]"
         }`}
       >
         {isThinking ? (
@@ -276,19 +277,8 @@ const MessageComponent: React.FC<MessageComponentProps & {
 
   if (isUser) {
     return (
-      /* User — whole block pushed right */
       <div className={`flex justify-end ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
-        <div className="flex items-start gap-2.5 w-[55%]">
-          {/* Avatar on the LEFT of the bubble */}
-          <div className="flex-shrink-0 mt-5">
-            <div className="w-7 h-7 rounded-full bg-black border border-black flex items-center justify-center">
-              <User className="w-3.5 h-3.5 text-white" />
-            </div>
-          </div>
-
-          {/* Content column */}
-          <div className="flex flex-col min-w-0 flex-1">
-            {/* Header: You (left) · time (right) */}
+        <div className="flex flex-col min-w-0 w-[70%] min-w-[70%] max-w-[70%]">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[11px] font-semibold text-foreground">You</span>
               {!isThinking && (
@@ -304,26 +294,16 @@ const MessageComponent: React.FC<MessageComponentProps & {
                 Show less ↑
               </button>
             )}
-          </div>
         </div>
       </div>
     );
   }
 
-  /* Assistant — left-aligned */
   return (
-    <div className={`flex items-start gap-2.5 ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
-      <div className="flex-shrink-0 mt-5">
-        <Avatar className="w-7 h-7 border">
-          <AvatarImage src="/ant-logo.svg" alt="AI" />
-          <AvatarFallback>AI</AvatarFallback>
-        </Avatar>
-      </div>
-
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Header: Assistant (left) · time (right) */}
+    <div className={`flex justify-start ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
+      <div className="flex flex-col min-w-0 w-[70%] min-w-[70%] max-w-[70%]">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[11px] font-semibold text-foreground">Assistant</span>
+          <span className="text-[11px] font-semibold text-foreground">Chatbot</span>
           {!isThinking && (
             <span className="text-[9px] text-muted-foreground/55">{timeStr}</span>
           )}
@@ -1097,7 +1077,7 @@ export default function AIChat() {
     ];
     for (const msg of messages) {
       if (msg.content === "thinking") continue;
-      lines.push(`### ${msg.role === "user" ? "You" : "Assistant"}`);
+      lines.push(`### ${msg.role === "user" ? "You" : "Chatbot"}`);
       lines.push(msg.content);
       for (const chart of msg.charts ?? []) {
         if (chart.config?.title) { lines.push(""); lines.push(`_[Chart: ${chart.config.title}]_`); }
@@ -1548,6 +1528,41 @@ export default function AIChat() {
           </CardHeader>
 
           <CardContent className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory relative z-[6] pb-20">
+            <div
+              className="pointer-events-none absolute inset-0 z-[5] overflow-hidden transition-opacity duration-700"
+              aria-hidden
+              style={{ opacity: isLoading ? 1 : 0 }}
+            >
+              <div
+                className="absolute -inset-[28%] animate-fda-bubble-1"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(125deg, rgba(99, 102, 241, 0.4) 0%, rgba(139, 92, 246, 0.28) 40%, transparent 72%)",
+                }}
+              />
+              <div
+                className="absolute -inset-[24%] animate-fda-bubble-2"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(215deg, rgba(59, 130, 246, 0.36) 0%, rgba(14, 165, 233, 0.22) 45%, transparent 70%)",
+                }}
+              />
+              <div
+                className="absolute -inset-[20%] animate-fda-bubble-3"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(55deg, rgba(236, 72, 153, 0.34) 0%, rgba(168, 85, 247, 0.24) 42%, transparent 68%)",
+                }}
+              />
+              <div
+                className="absolute -inset-[22%] animate-fda-bubble-4"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(310deg, rgba(20, 184, 166, 0.3) 0%, rgba(99, 102, 241, 0.2) 50%, transparent 65%)",
+                }}
+              />
+            </div>
+            <div className="relative z-[6] min-h-full">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full animate-fade-in-up max-w-[95%] mx-auto">
                 <h2 className="text-[16px] mb-6">
@@ -1636,6 +1651,7 @@ export default function AIChat() {
                 <div ref={messagesEndRef} className="h-4" />
               </div>
             )}
+            </div>
           </CardContent>
         </Card>
 

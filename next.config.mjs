@@ -26,8 +26,13 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
-  // Build a self-contained server for the Dockerfile.prod multi-stage image.
-  output: "standalone",
+  // NOTE: `output: "standalone"` is the right choice for the Dockerfile.prod
+  // image (smaller, self-contained). It is intentionally OFF here because we
+  // currently run bare on EC2 under pm2 with `next start`, and the standalone
+  // runtime does not auto-load `.env*` files — that broke DATABASE_URL
+  // resolution at runtime. Re-enable when we cut over to the Docker image
+  // and inject env via the container environment.
+  // output: "standalone",
 
   // Hide the `X-Powered-By: Next.js` header — minor fingerprinting reduction.
   poweredByHeader: false,

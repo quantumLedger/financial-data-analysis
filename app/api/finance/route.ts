@@ -21,8 +21,11 @@ async function fetchCombinedCSVsByFirm(
     formData.append("portfolio_type", portfolioType);
     formData.append("firm_name", firmName);
     formData.append("client_id", clientId);
+    // X-Internal-Key authenticates this BFF \u2192 fin-sight-engine call without
+    // a per-user Cognito token. Server-side only; never exposed to the browser.
     const response = await fetch(`${API_URL}/api/fetch-combined-csvs-by-firm`, {
       method: "POST",
+      headers: { ...internalApiKeyHeader() },
       body: formData,
     });
     if (!response.ok) {
@@ -661,8 +664,8 @@ Focus on clear, actionable financial insights.`;
               throw err;
             }
 
-            const toolBlocks = message.content.filter((c) => c.type === "tool_use") as any[];
-            const hasFinsightCalls = toolBlocks.some((b) => FINSIGHT_TOOL_NAMES.has(b.name));
+            const toolBlocks = message.content.filter((c: any) => c.type === "tool_use") as any[];
+            const hasFinsightCalls = toolBlocks.some((b: any) => FINSIGHT_TOOL_NAMES.has(b.name));
 
             // If no finSightAI calls needed — this is the final round
             if (message.stop_reason !== "tool_use" || !hasFinsightCalls) {
