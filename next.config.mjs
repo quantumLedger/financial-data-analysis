@@ -78,6 +78,18 @@ const nextConfig = {
   // Don't ship readable source maps to the browser in production.
   productionBrowserSourceMaps: false,
 
+  // Next.js 16 blocks cross-origin requests to internal dev resources
+  // (e.g. `/__nextjs_font/*`, `/_next/webpack-hmr`) by default. When this
+  // app is served via `finance.weidentify.ai` but `next dev` thinks of
+  // itself as `localhost:4000`, the iframe parent ends up "cross-origin"
+  // to those dev endpoints and fonts / HMR get blocked with a console
+  // warning. Allow-list the real public host(s) here. Only used by
+  // `next dev`; ignored by `next start`.
+  allowedDevOrigins: [
+    "finance.weidentify.ai",
+    "inspolio.weidentify.ai",
+  ],
+
   async headers() {
     return [
       {
