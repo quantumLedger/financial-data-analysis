@@ -9,9 +9,32 @@ import { NextResponse, type NextRequest } from "next/server";
 const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5 MB
 const isProd = process.env.NODE_ENV === "production";
 
+// Mirror of next.config.mjs `allowedFrameAncestors`. Kept here so SSE /
+// streaming responses (which bypass the framework headers pipeline) are
+// still embeddable by the fin-sight-front iframe.
+const parentOriginsFromEnv = process.env.NEXT_PUBLIC_ALLOWED_PARENT_ORIGINS
+  ?.split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+const allowedFrameAncestors = parentOriginsFromEnv?.length
+  ? parentOriginsFromEnv
+  : isProd
+    ? [
+        "https://inspolio.weidentify.ai",
+        "https://app.weidentify.ai",
+        "https://weidentify.ai",
+      ]
+    : ["http://localhost:3000"];
+
+const frameAncestorsValue = ["'self'", ...allowedFrameAncestors].join(" ");
+
 const SECURITY_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
-  "X-Frame-Options": "DENY",
+  // Replaces the previous `X-Frame-Options: DENY` which was unconditionally
+  // blocking the fin-sight-front iframe (request showed as "cancelled" in
+  // the network tab with "refused to connect" in the iframe).
+  "Content-Security-Policy": `frame-ancestors ${frameAncestorsValue};`,
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Permissions-Policy":
     "geolocation=(), microphone=(), camera=(), payment=(), usb=()",
