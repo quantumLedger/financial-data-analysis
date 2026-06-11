@@ -6,6 +6,7 @@ import { retryWithBackoff } from "@/lib/retry";
 import { maybeAlertLlmQuotaForError } from "@/lib/llmQuotaAlarm";
 import { internalApiKeyHeader } from "@/lib/internalApiKey";
 import { resolveAssistantDisplayContent } from "@/lib/assistantMessage";
+import { sanitizeMessageForPersistence } from "@/lib/messageDisplay";
 
 // ─── Portfolio data fetch ────────────────────────────────────────────────────
 
@@ -789,7 +790,7 @@ Focus on clear, actionable financial insights.`;
                     data: {
                       conversationId,
                       role: "user",
-                      content: userContent,
+                      content: sanitizeMessageForPersistence(userContent),
                       fileMetadata: fileMetadata ?? undefined,
                     },
                   }),

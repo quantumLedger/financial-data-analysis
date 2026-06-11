@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback, useMemo, memo, useImperativeHandle, forwardRef } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo, memo, useImperativeHandle, forwardRef, startTransition } from "react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +33,14 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { ContentModal } from "@/components/ContentModal";
 import { PanelResizer } from "@/components/PanelResizer";
+import { FullPageLoader } from "@/components/FullPageLoader";
+import { MessageDetailContent } from "@/components/MessageDetailContent";
+import {
+  sanitizeMessageForDisplay,
+  messageHasExpandableDetail,
+  getReadMoreLabel,
+  isTrivialGreetingMessage,
+} from "@/lib/messageDisplay";
 import FilePreview from "@/components/FilePreview";
 import { ChartRenderer } from "@/components/ChartRenderer";
 import { DataTableRenderer } from "@/components/DataTableRenderer";
@@ -317,9 +325,35 @@ const MessageComponent = memo(function MessageComponent({
   const isUser = message.role === "user";
   const isThinking = message.content === "thinking";
   const [readMoreOpen, setReadMoreOpen] = useState(false);
+  const [readMoreLoading, setReadMoreLoading] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const bubbleInnerRef = useRef<HTMLDivElement>(null);
   const speakerLabel = isUser ? "You" : ASSISTANT_NAME;
+
+  const displayContent = useMemo(
+    () => (isThinking ? message.content : sanitizeMessageForDisplay(message.content)),
+    [message.content, isThinking]
+  );
+  const expandable = useMemo(
+    () => !isThinking && messageHasExpandableDetail(message.content),
+    [message.content, isThinking]
+  );
+  const readMoreLabel = useMemo(
+    () => getReadMoreLabel(message.content),
+    [message.content]
+  );
+
+  const openReadMore = useCallback(() => {
+    setReadMoreLoading(true);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        startTransition(() => {
+          setReadMoreOpen(true);
+          setReadMoreLoading(false);
+        });
+      });
+    });
+  }, []);
 
   const timeStr = message.timestamp
     ? new Date(message.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
@@ -334,7 +368,7 @@ const MessageComponent = memo(function MessageComponent({
     const ro = new ResizeObserver(check);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [message.content]);
+  }, [displayContent]);
 
   /* ── shared bubble + expand/collapse ── */
   const bubble = (
@@ -355,12 +389,12 @@ const MessageComponent = memo(function MessageComponent({
           </div>
         ) : (
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-            {message.content}
+            {displayContent}
           </ReactMarkdown>
         )}
       </div>
 
-      {overflows && !readMoreOpen && (
+      {(overflows || expandable) && !readMoreOpen && (
         <div
           className={`absolute bottom-0 left-0 right-0 h-14 flex items-end justify-center pb-2 rounded-b-lg bg-gradient-to-t to-transparent ${
             isUser ? "from-primary/90" : "from-muted/95"
@@ -368,10 +402,10 @@ const MessageComponent = memo(function MessageComponent({
         >
           <button
             type="button"
-            onClick={() => setReadMoreOpen(true)}
+            onClick={openReadMore}
             className="text-[10px] font-semibold px-3 py-1 rounded-full border border-black bg-black text-white hover:bg-neutral-800 shadow-sm transition-colors"
           >
-            Read more
+            {readMoreLabel}
           </button>
         </div>
       )}
@@ -387,21 +421,29 @@ const MessageComponent = memo(function MessageComponent({
         )}
       </div>
       {bubble}
+      {expandable && !overflows && !readMoreOpen && (
+        <button
+          type="button"
+          onClick={openReadMore}
+          className="mt-1.5 self-center text-[10px] font-semibold px-3 py-1 rounded-full border border-black bg-black text-white hover:bg-neutral-800 shadow-sm transition-colors"
+        >
+          {readMoreLabel}
+        </button>
+      )}
+      <FullPageLoader open={readMoreLoading} message="Loading your message" />
       <ContentModal
         open={readMoreOpen}
         onClose={() => setReadMoreOpen(false)}
         title={speakerLabel}
         subtitle={timeStr}
       >
-        <div className="rounded-lg border bg-muted/30 px-3 py-2.5 leading-relaxed text-[13px] break-words">
-          {isThinking ? (
-            <span className="text-muted-foreground text-[11px]">{message.status ?? "Thinking"}</span>
-          ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-              {message.content}
-            </ReactMarkdown>
-          )}
-        </div>
+        {readMoreOpen ? (
+          <MessageDetailContent
+            content={message.content}
+            isThinking={isThinking}
+            status={message.status}
+          />
+        ) : null}
       </ContentModal>
     </>
   );
@@ -906,7 +948,11 @@ export default function AIChat() {
           hasToolUse: m.hasToolUse ?? false,
         };
       });
-      setMessages(loaded);
+      setMessages(
+        loaded.filter(
+          (m) => m.content === "thinking" || !(m.role === "user" && isTrivialGreetingMessage(m.content))
+        )
+      );
       setConversationId(convId);
       hasAutoInitialized.current = true;
     } catch (err) {
@@ -1718,6 +1764,16 @@ export default function AIChat() {
 
   const chartPanelCount = visualizationItems.length;
 
+  const visibleMessages = useMemo(
+    () =>
+      messages.filter(
+        (m) =>
+          m.content === "thinking" ||
+          !(m.role === "user" && isTrivialGreetingMessage(m.content))
+      ),
+    [messages]
+  );
+
   const handleInitialize = async () => {
     if (!proposedCsv || !portfolioJson) {
       toast({
@@ -1828,24 +1884,83 @@ export default function AIChat() {
               }} />
           </div>
           <CardHeader className="py-3 px-4 relative z-[6]">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div>
-                  <CardTitle className="text-[16px]">Financial AI Assistant</CardTitle>
-                  <CardDescription className="text-[13px]">
-                    Powered by weidentify.ai
-                  </CardDescription>
-                </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 shrink">
+                <CardTitle className="text-[16px] leading-tight">Financial AI Assistant</CardTitle>
+                <CardDescription className="text-[9px] text-muted-foreground/75 mt-0.5 leading-none">
+                  Powered by weidentify.ai
+                </CardDescription>
               </div>
 
-              <div className="flex items-center gap-2">
-                {/* Single export button — popup rendered as fixed portal below */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {conversations.length > 0 && (
+                  <>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="h-8 text-[11px] px-3 max-w-[200px]"
+                          disabled={loadingConversation}
+                        >
+                          {loadingConversation ? (
+                            <span className="flex items-center gap-1.5 truncate">
+                              <RectLoader size="sm" />
+                              <span className="truncate">Loading conversation</span>
+                            </span>
+                          ) : (
+                            <>
+                              <span className="truncate">
+                                {conversations.find((c) => c.id === conversationId)?.title ?? "History"}
+                              </span>
+                              <ChevronDown className="ml-2 h-4 w-4 shrink-0" />
+                            </>
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-[min(280px,calc(100vw-2rem))] z-[200]">
+                        {conversations.map((c) => (
+                          <DropdownMenuItem
+                            key={c.id}
+                            onSelect={() => loadConversation(c.id)}
+                            className={`flex flex-col items-start gap-0.5 py-2 cursor-pointer ${
+                              c.id === conversationId ? "bg-muted" : ""
+                            }`}
+                          >
+                            <span
+                              className={`text-[11px] truncate w-full ${
+                                c.id === conversationId ? "font-semibold" : "font-medium"
+                              }`}
+                            >
+                              {c.title}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground leading-snug">
+                              {relativeTime(c.updatedAt)}, {c._count.messages} messages
+                            </span>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <Button
+                      variant="outline"
+                      className="h-8 text-[11px] px-3 shrink-0"
+                      disabled={loadingConversation}
+                      onClick={() => {
+                        setMessages([]);
+                        setConversationId(null);
+                        hasAutoInitialized.current = true;
+                      }}
+                    >
+                      + New
+                    </Button>
+                  </>
+                )}
+
                 <div className="relative group" ref={exportPopupRef}>
                   <Button
                     ref={exportBtnRef}
-                    variant="ghost"
+                    variant="outline"
                     size="icon"
-                    className="h-8 w-8"
+                    className="h-8 w-8 shrink-0"
                     onClick={() => {
                       if (exportBtnRef.current) {
                         const r = exportBtnRef.current.getBoundingClientRect();
@@ -1857,7 +1972,6 @@ export default function AIChat() {
                   >
                     <Download className="h-4 w-4" />
                   </Button>
-                  {/* Hover tooltip */}
                   <div className="pointer-events-none absolute top-full right-0 mt-1.5 z-[300] opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                     <div className="bg-popover border rounded-lg shadow-md px-2.5 py-1.5 text-[10px] whitespace-nowrap text-popover-foreground">
                       Export as Markdown or PDF
@@ -1869,14 +1983,16 @@ export default function AIChat() {
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="outline"
-                      className="h-8 text-[11px]"
+                      className="h-8 text-[11px] px-3 max-w-[200px]"
                       title={models.find((m) => m.id === selectedModel)?.description}
                     >
-                      {models.find((m) => m.id === selectedModel)?.name}
-                      <ChevronDown className="ml-2 h-4 w-4" />
+                      <span className="truncate">
+                        {models.find((m) => m.id === selectedModel)?.name}
+                      </span>
+                      <ChevronDown className="ml-2 h-4 w-4 shrink-0" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent className="z-[200] w-[min(320px,calc(100vw-2rem))]">
+                  <DropdownMenuContent align="end" className="z-[200] w-[min(320px,calc(100vw-2rem))]">
                     {models.map((model) => (
                       <DropdownMenuItem
                         key={model.id}
@@ -1901,66 +2017,11 @@ export default function AIChat() {
                 </DropdownMenu>
               </div>
             </div>
-            {conversations.length > 0 && (
-              <div className="flex items-center gap-2 mt-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      className="h-7 text-[11px] px-2 max-w-[200px]"
-                      disabled={loadingConversation}
-                    >
-                      {loadingConversation ? (
-                        <div className="flex items-center gap-1.5">
-                          <RectLoader size="sm" />
-                          <span>Loading conversation</span>
-                        </div>
-                      ) : (
-                        <>
-                          <span className="truncate">
-                            {conversations.find((c) => c.id === conversationId)?.title ?? "History"}
-                          </span>
-                          <ChevronDown className="ml-1 h-3 w-3 flex-shrink-0" />
-                        </>
-                      )}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-[260px] z-[200]">
-                    {conversations.map((c) => (
-                      <DropdownMenuItem
-                        key={c.id}
-                        onSelect={() => loadConversation(c.id)}
-                        className={`flex flex-col items-start gap-0.5 py-2 ${c.id === conversationId ? "bg-muted" : ""}`}
-                      >
-                        <span className={`text-[11px] truncate w-full ${c.id === conversationId ? "font-semibold" : ""}`}>
-                          {c.title}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {relativeTime(c.updatedAt)}, {c._count.messages} messages
-                        </span>
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button
-                  variant="outline"
-                  className="h-7 text-[11px] px-2 flex-shrink-0"
-                  disabled={loadingConversation}
-                  onClick={() => {
-                    setMessages([]);
-                    setConversationId(null);
-                    hasAutoInitialized.current = true; // keep true so auto-init doesn't fire; user starts fresh manually
-                  }}
-                >
-                  + New
-                </Button>
-              </div>
-            )}
           </CardHeader>
 
           <CardContent className="flex flex-1 flex-col overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory relative z-[6] pb-20 min-h-0">
             <div className="relative flex flex-1 flex-col min-h-0">
-            {messages.length === 0 ? (
+            {visibleMessages.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center animate-fade-in-up w-full max-w-sm mx-auto px-2">
                 <h2 className="text-[19px] font-medium text-center mb-6 w-full">
                   Getting Started with Inspolio Copilot
@@ -2028,7 +2089,7 @@ export default function AIChat() {
               </div>
             ) : (
               <div className="space-y-4 min-h-full">
-                {messages.map((message, index) => (
+                {visibleMessages.map((message, index) => (
                   <div
                     key={message.id}
                     className={`animate-fade-in-up ${
@@ -2038,11 +2099,13 @@ export default function AIChat() {
                     <MessageComponent message={message} />
                     {message.role === "assistant" &&
                       message.followUps &&
-                      message.followUps.length > 0 &&
-                      index === messages.length - 1 &&
+                      message.followUps.filter((q) => !isTrivialGreetingMessage(q)).length > 0 &&
+                      index === visibleMessages.length - 1 &&
                       !isLoading && (
                         <div className="flex flex-wrap gap-1.5 mt-2 ml-10">
-                          {message.followUps.map((q, i) => (
+                          {message.followUps
+                            .filter((q) => !isTrivialGreetingMessage(q))
+                            .map((q, i) => (
                             <button
                               key={i}
                               onClick={() => !isLoading && handleFollowUp(q)}
