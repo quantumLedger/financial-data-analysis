@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo, memo, useImperativeHandle, forwardRef } from "react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import {
@@ -196,7 +196,7 @@ interface MessageComponentProps {
   message: Message;
 }
 
-const SafeChartRenderer: React.FC<{ data: ChartData }> = ({ data }) => {
+const SafeChartRenderer = memo(function SafeChartRenderer({ data }: { data: ChartData }) {
   try {
     return (
       <div className="w-full h-full p-6 flex flex-col">
@@ -212,17 +212,23 @@ const SafeChartRenderer: React.FC<{ data: ChartData }> = ({ data }) => {
       <div className="text-red-500">Error rendering chart: {errorMessage}</div>
     );
   }
-};
+});
 
 const MAX_MSG_HEIGHT = 400;
 
-const MessageComponent: React.FC<MessageComponentProps & { 
-  isCollapsed?: boolean; 
+const MessageComponent = memo(function MessageComponent({
+  message,
+  isCollapsed = false,
+  isOldMessage = false,
+  messageIndex = 0,
+  totalMessages = 0,
+}: MessageComponentProps & {
+  isCollapsed?: boolean;
   onToggleCollapse?: () => void;
   isOldMessage?: boolean;
   messageIndex?: number;
   totalMessages?: number;
-}> = ({ message, isCollapsed = false, isOldMessage = false, messageIndex = 0, totalMessages = 0 }) => {
+}) {
   const isUser = message.role === "user";
   const isThinking = message.content === "thinking";
   const [expanded, setExpanded] = useState(false);
@@ -326,7 +332,253 @@ const MessageComponent: React.FC<MessageComponentProps & {
       </div>
     </div>
   );
+});
+
+type PanelItem =
+  | { type: "chart"; data: ChartData; key: string }
+  | { type: "table"; data: TableData; key: string }
+  | { type: "memo"; data: MemoData; key: string }
+  | { type: "narrative"; data: NarrativeData; key: string };
+
+const VisualizationPanel = memo(function VisualizationPanel({
+  items,
+  onScroll,
+  contentRef,
+  chartEndRef,
+}: {
+  items: PanelItem[];
+  onScroll: () => void;
+  contentRef: React.RefObject<HTMLDivElement>;
+  chartEndRef: React.RefObject<HTMLDivElement>;
+}) {
+  return (
+    <CardContent
+      ref={contentRef}
+      className="flex-1 overflow-y-auto min-h-0 snap-y snap-mandatory pb-20 relative z-[6]"
+      onScroll={onScroll}
+    >
+      <div className="min-h-full flex flex-col">
+        {items.map((item, idx) => (
+          <div
+            key={item.key}
+            className="w-full min-h-full flex-shrink-0 snap-start snap-always"
+            ref={idx === items.length - 1 ? chartEndRef : null}
+          >
+            {item.type === "chart" && <SafeChartRenderer data={item.data} />}
+            {item.type === "table" && (
+              <div className="w-full h-full p-6 flex flex-col">
+                <div className="w-[90%] mx-auto">
+                  <DataTableRenderer data={item.data} />
+                </div>
+              </div>
+            )}
+            {item.type === "memo" && (
+              <div className="w-full h-full p-6 flex flex-col">
+                <div className="w-[90%] flex-1 mx-auto">
+                  <MemoRenderer data={item.data} />
+                </div>
+              </div>
+            )}
+            {item.type === "narrative" && (
+              <div className="w-full h-full p-6 flex flex-col">
+                <div className="w-[90%] mx-auto">
+                  <NarrativeCard data={item.data} />
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </CardContent>
+  );
+});
+
+export type ChatInputHandle = {
+  setText: (text: string) => void;
+  focus: () => void;
 };
+
+const ChatInputBar = memo(
+  forwardRef<
+    ChatInputHandle,
+    {
+      isLoading: boolean;
+      isUploading: boolean;
+      includeLiveData: boolean;
+      onIncludeLiveDataChange: (value: boolean) => void;
+      currentUpload: FileUpload | null;
+      onRemoveUpload: () => void;
+      onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+      onSubmit: (text: string) => void;
+      onAbort: () => void;
+    }
+  >(function ChatInputBar(
+    {
+      isLoading,
+      isUploading,
+      includeLiveData,
+      onIncludeLiveDataChange,
+      currentUpload,
+      onRemoveUpload,
+      onFileSelect,
+      onSubmit,
+      onAbort,
+    },
+    ref
+  ) {
+    const [input, setInput] = useState("");
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    useImperativeHandle(ref, () => ({
+      setText: (text: string) => {
+        setInput(text);
+        const textarea = textareaRef.current;
+        if (textarea) {
+          textarea.style.height = "auto";
+          textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+        }
+      },
+      focus: () => textareaRef.current?.focus(),
+    }));
+
+    const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const textarea = event.target;
+      setInput(textarea.value);
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (isLoading || isUploading) return;
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (input.trim() || currentUpload) {
+          onSubmit(input);
+          setInput("");
+          if (textareaRef.current) {
+            textareaRef.current.style.height = "36px";
+          }
+        }
+      }
+    };
+
+    const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!input.trim() && !currentUpload) return;
+      if (isLoading || isUploading) return;
+      onSubmit(input);
+      setInput("");
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "36px";
+      }
+    };
+
+    return (
+      <form
+        onSubmit={handleFormSubmit}
+        className="absolute bottom-5 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl z-50"
+      >
+        {currentUpload && (
+          <div className="mb-2 px-1">
+            <FilePreview file={currentUpload} onRemove={onRemoveUpload} />
+          </div>
+        )}
+
+        <div className="rounded-lg relative">
+          {(isLoading || isUploading) && (
+            <div className="absolute inset-0 z-10 rounded-lg bg-white/80 backdrop-blur-[2px] flex items-center justify-center">
+              <Button
+                type="button"
+                onClick={onAbort}
+                size="sm"
+                className="h-8 px-4 rounded-full bg-black hover:bg-neutral-800 text-white text-[11px] font-semibold flex items-center gap-1.5 shadow-md"
+                title="Stop generating"
+              >
+                <Square className="h-3 w-3 fill-current" />
+                Stop
+              </Button>
+            </div>
+          )}
+          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white rounded-lg shadow-sm border border-neutral-800">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading || isUploading}
+              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+              title="Attach file"
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
+
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                isLoading
+                  ? "Generating analysis…"
+                  : isUploading
+                    ? "Processing file…"
+                    : "Ask a question about your portfolio…"
+              }
+              readOnly={isLoading || isUploading}
+              className="flex-1 min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent shadow-none py-2 px-1 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+              rows={1}
+            />
+
+            {(isLoading || isUploading) && (
+              <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60 opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary/80" />
+                </span>
+                {isUploading ? "Uploading…" : "Analyzing…"}
+              </div>
+            )}
+
+            <div className="h-5 w-px bg-border shrink-0" />
+
+            <div className="flex items-center gap-1 shrink-0">
+              <label
+                htmlFor="live-data-toggle"
+                className="text-[10px] text-muted-foreground cursor-pointer whitespace-nowrap"
+              >
+                Live
+              </label>
+              <Switch
+                id="live-data-toggle"
+                checked={includeLiveData}
+                onCheckedChange={onIncludeLiveDataChange}
+                className="scale-75 origin-right"
+              />
+            </div>
+
+            <Button
+              type="submit"
+              size="icon"
+              disabled={isLoading || isUploading || (!input.trim() && !currentUpload)}
+              className="h-8 w-8 rounded-full shrink-0"
+              title="Send"
+            >
+              <Send className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+
+        <input
+          type="file"
+          ref={fileInputRef}
+          className="hidden"
+          onChange={onFileSelect}
+        />
+      </form>
+    );
+  })
+);
 
 const ChartPagination = ({
   total,
@@ -453,13 +705,11 @@ export default function AIChat() {
   const bankerId = String(effectiveIcfObj?.investment_banker_id || "");
 
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-6");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chartEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const chatInputRef = useRef<ChatInputHandle>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [currentUpload, setCurrentUpload] = useState<FileUpload | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -487,6 +737,8 @@ export default function AIChat() {
   // The saved preference is applied after mount to avoid hydration mismatch.
   const [leftPanelWidth, setLeftPanelWidth] = useState(33.33);
   const [isResizing, setIsResizing] = useState(false);
+  const resizeRafRef = useRef<number | null>(null);
+  const pendingPanelWidthRef = useRef(33.33);
 
   const loadConversation = useCallback(async (convId: string) => {
     setLoadingConversation(true);
@@ -791,32 +1043,42 @@ export default function AIChat() {
 
   // Restore saved panel width after mount (client only — avoids SSR hydration mismatch)
   useEffect(() => {
-    const saved = localStorage.getItem('leftPanelWidth');
-    if (saved) setLeftPanelWidth(parseFloat(saved));
+    const saved = localStorage.getItem("leftPanelWidth");
+    if (saved) {
+      const width = parseFloat(saved);
+      pendingPanelWidthRef.current = width;
+      setLeftPanelWidth(width);
+    }
   }, []);
 
-  // Persist panel width whenever it changes
-  useEffect(() => {
-    localStorage.setItem('leftPanelWidth', leftPanelWidth.toString());
-  }, [leftPanelWidth]);
-
-  // Handle resizing
+  // Handle resizing — rAF-throttled updates; localStorage only on mouseup
   useEffect(() => {
     if (!isResizing) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       e.preventDefault();
       if (!resizableContainerRef.current) return;
-      
+
       const containerRect = resizableContainerRef.current.getBoundingClientRect();
       const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100;
-      
-      // Constrain between 20% and 70%
       const constrainedWidth = Math.max(20, Math.min(70, newWidth));
-      setLeftPanelWidth(constrainedWidth);
+      pendingPanelWidthRef.current = constrainedWidth;
+
+      if (resizeRafRef.current == null) {
+        resizeRafRef.current = requestAnimationFrame(() => {
+          setLeftPanelWidth(pendingPanelWidthRef.current);
+          resizeRafRef.current = null;
+        });
+      }
     };
 
     const handleMouseUp = () => {
+      if (resizeRafRef.current != null) {
+        cancelAnimationFrame(resizeRafRef.current);
+        resizeRafRef.current = null;
+      }
+      setLeftPanelWidth(pendingPanelWidthRef.current);
+      localStorage.setItem("leftPanelWidth", pendingPanelWidthRef.current.toString());
       setIsResizing(false);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
@@ -1034,24 +1296,9 @@ export default function AIChat() {
     abortControllerRef.current?.abort();
   }, []);
 
-  // Lock textarea to single-line height while a request is in flight
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    if (isLoading || isUploading) {
-      el.style.height = "36px";
-      el.style.overflowY = "hidden";
-    } else {
-      el.style.overflowY = "";
-      // Restore natural height based on current content
-      el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-    }
-  }, [isLoading, isUploading]);
-
   const handleFollowUp = useCallback((question: string) => {
-    setInput(question);
-    textareaRef.current?.focus();
+    chatInputRef.current?.setText(question);
+    chatInputRef.current?.focus();
   }, []);
 
   // ── Export popup ──────────────────────────────────────────────────────────
@@ -1168,16 +1415,15 @@ export default function AIChat() {
     }
   }, [exportTitle, accountName, firmName, allMemos, allNarratives, allTables, allCharts]);
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!input.trim() && !currentUpload) return;
+  const handleSendMessage = useCallback(async (text: string) => {
+    if (!text.trim() && !currentUpload) return;
     if (isLoading || isUploading || isInFlightRef.current) return;
     isInFlightRef.current = true;
     setIsScrollLocked(true);
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      content: input,
+      content: text,
       file: currentUpload || undefined,
       timestamp: new Date().toISOString(),
     };
@@ -1191,10 +1437,6 @@ export default function AIChat() {
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMessage, thinkingMessage]);
-    setInput("");
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "36px";
-    }
     setIsLoading(true);
     const apiMessages = [...messages, userMessage].map((msg) => {
       if (msg.file) {
@@ -1223,7 +1465,7 @@ export default function AIChat() {
       }
       return { role: msg.role, content: msg.content };
     });
-    const convId = await ensureConversation(input);
+    const convId = await ensureConversation(text);
     const requestBody = {
       messages: apiMessages,
       model: selectedModel,
@@ -1265,46 +1507,43 @@ export default function AIChat() {
         });
       });
     }
-  };
+  }, [
+    currentUpload,
+    isLoading,
+    isUploading,
+    messages,
+    selectedModel,
+    icfObj,
+    includeLiveData,
+    portfolioJson,
+    ensureConversation,
+    callFinanceStream,
+  ]);
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (isLoading || isUploading || isInFlightRef.current) return;
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      if (input.trim() || currentUpload) {
-        const form = e.currentTarget.form;
-        if (form) {
-          const submitEvent = new Event("submit", {
-            bubbles: true,
-            cancelable: true,
-          });
-          form.dispatchEvent(submitEvent);
-        }
-      }
-    }
-  };
-
-  const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const textarea = event.target;
-    setInput(textarea.value);
-    
-    // Reset height to auto to get the correct scrollHeight
-    textarea.style.height = "auto";
-    
-    // Calculate new height (limit max height to 200px)
-    const newHeight = Math.min(textarea.scrollHeight, 200);
-    
-    // Set new height - it will grow upward naturally with items-end alignment
-    textarea.style.height = `${newHeight}px`;
-  };
-
-  const hasCharts = messages.some(
-    (m) =>
-      (m.charts?.length ?? 0) > 0 ||
-      (m.tables?.length ?? 0) > 0 ||
-      (m.memos?.length ?? 0) > 0 ||
-      (m.narratives?.length ?? 0) > 0
+  const hasCharts = useMemo(
+    () =>
+      messages.some(
+        (m) =>
+          (m.charts?.length ?? 0) > 0 ||
+          (m.tables?.length ?? 0) > 0 ||
+          (m.memos?.length ?? 0) > 0 ||
+          (m.narratives?.length ?? 0) > 0
+      ),
+    [messages]
   );
+
+  const visualizationItems = useMemo(() => {
+    const items: PanelItem[] = [];
+    messages.forEach((message, msgIdx) => {
+      (message.charts ?? []).forEach((d, i) => items.push({ type: "chart", data: d, key: `chart-${msgIdx}-${i}` }));
+      (message.tables ?? []).forEach((d, i) => items.push({ type: "table", data: d, key: `table-${msgIdx}-${i}` }));
+      (message.memos ?? []).forEach((d, i) => items.push({ type: "memo", data: d, key: `memo-${msgIdx}-${i}` }));
+      (message.narratives ?? []).forEach((d, i) => items.push({ type: "narrative", data: d, key: `narrative-${msgIdx}-${i}` }));
+    });
+    return items;
+  }, [messages]);
+
+  const chartPanelCount = visualizationItems.length;
 
   const handleInitialize = async () => {
     if (!proposedCsv || !portfolioJson) {
@@ -1381,7 +1620,7 @@ export default function AIChat() {
         className="flex-1 flex bg-background mt-0 pt-2 min-h-0 resizable-container relative px-3 pb-2"
       >
         <Card 
-          className="flex flex-col h-full transition-all mr-2 relative overflow-hidden"
+          className={`flex flex-col h-full mr-2 relative overflow-hidden ${isResizing ? "" : "transition-[width] duration-150"}`}
           style={{ width: `calc(${leftPanelWidth}% - 0.5rem)` }}
         >
           {/* Always-on ambient bubble — pink/blue AI-flow during API calls */}
@@ -1691,7 +1930,7 @@ export default function AIChat() {
         </div>
 
         <Card 
-          className="flex flex-col h-full overflow-hidden transition-all ml-2 relative"
+          className={`flex flex-col h-full overflow-hidden ml-2 relative ${isResizing ? "" : "transition-[width] duration-150"}`}
           style={{ width: `calc(${100 - leftPanelWidth}% - 0.5rem)` }}
         >
           {/* Always-on ambient bubble — pink/blue AI-flow during API calls */}
@@ -1731,61 +1970,19 @@ export default function AIChat() {
             </CardHeader>
           )}
 
-          <CardContent
-            ref={contentRef}
-            className="flex-1 overflow-y-auto min-h-0 snap-y snap-mandatory pb-20 relative z-[6]"
-            onScroll={handleChartScroll}
-          >
-            {hasCharts ? (
-              <div className="min-h-full flex flex-col">
-                {(() => {
-                  type PanelItem =
-                    | { type: "chart"; data: ChartData; key: string }
-                    | { type: "table"; data: TableData; key: string }
-                    | { type: "memo"; data: MemoData; key: string }
-                    | { type: "narrative"; data: NarrativeData; key: string };
-
-                  const items: PanelItem[] = [];
-                  messages.forEach((message, msgIdx) => {
-                    (message.charts ?? []).forEach((d, i) => items.push({ type: "chart", data: d, key: `chart-${msgIdx}-${i}` }));
-                    (message.tables ?? []).forEach((d, i) => items.push({ type: "table", data: d, key: `table-${msgIdx}-${i}` }));
-                    (message.memos ?? []).forEach((d, i) => items.push({ type: "memo", data: d, key: `memo-${msgIdx}-${i}` }));
-                    (message.narratives ?? []).forEach((d, i) => items.push({ type: "narrative", data: d, key: `narrative-${msgIdx}-${i}` }));
-                  });
-
-                  return items.map((item, idx) => (
-                    <div
-                      key={item.key}
-                      className="w-full min-h-full flex-shrink-0 snap-start snap-always"
-                      ref={idx === items.length - 1 ? chartEndRef : null}
-                    >
-                      {item.type === "chart" && <SafeChartRenderer data={item.data} />}
-                      {item.type === "table" && (
-                        <div className="w-full h-full p-6 flex flex-col">
-                          <div className="w-[90%] mx-auto">
-                            <DataTableRenderer data={item.data} />
-                          </div>
-                        </div>
-                      )}
-                      {item.type === "memo" && (
-                        <div className="w-full h-full p-6 flex flex-col">
-                          <div className="w-[90%] flex-1 mx-auto">
-                            <MemoRenderer data={item.data} />
-                          </div>
-                        </div>
-                      )}
-                      {item.type === "narrative" && (
-                        <div className="w-full h-full p-6 flex flex-col">
-                          <div className="w-[90%] mx-auto">
-                            <NarrativeCard data={item.data} />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ));
-                })()}
-              </div>
-            ) : (
+          {hasCharts ? (
+            <VisualizationPanel
+              items={visualizationItems}
+              onScroll={handleChartScroll}
+              contentRef={contentRef}
+              chartEndRef={chartEndRef}
+            />
+          ) : (
+            <CardContent
+              ref={contentRef}
+              className="flex-1 overflow-y-auto min-h-0 snap-y snap-mandatory pb-20 relative z-[6]"
+              onScroll={handleChartScroll}
+            >
               <div className="h-full flex flex-col items-center justify-center text-center">
                 <div className="flex flex-col items-center justify-center gap-4 -translate-y-8">
                   <ChartColumnBig className="w-8 h-8 text-muted-foreground" />
@@ -1805,125 +2002,27 @@ export default function AIChat() {
                   </div>
                 </div>
               </div>
-            )}
-          </CardContent>
+            </CardContent>
+          )}
         </Card>
 
-        {/* ── Floating input — spans both panels, 20px from container bottom ── */}
-        <form
-          onSubmit={handleSubmit}
-          className="absolute bottom-5 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl z-50"
-        >
-          {currentUpload && (
-            <div className="mb-2 px-1">
-              <FilePreview file={currentUpload} onRemove={() => setCurrentUpload(null)} />
-            </div>
-          )}
-
-          {/* Input shell — always white, with loading overlay */}
-          <div className="rounded-lg relative">
-          {/* Loading overlay: very light grey blur over the whole input shell */}
-          {(isLoading || isUploading) && (
-            <div className="absolute inset-0 z-10 rounded-lg bg-white/80 backdrop-blur-[2px] flex items-center justify-center">
-              <Button
-                type="button"
-                onClick={handleAbort}
-                size="sm"
-                className="h-8 px-4 rounded-full bg-black hover:bg-neutral-800 text-white text-[11px] font-semibold flex items-center gap-1.5 shadow-md"
-                title="Stop generating"
-              >
-                <Square className="h-3 w-3 fill-current" />
-                Stop
-              </Button>
-            </div>
-          )}
-          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white rounded-lg shadow-sm border border-neutral-800">
-
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isLoading || isUploading}
-              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-              title="Attach file"
-            >
-              <Paperclip className="h-4 w-4" />
-            </Button>
-
-            <Textarea
-              ref={textareaRef}
-              value={input}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                isLoading
-                  ? "Generating analysis…"
-                  : isUploading
-                  ? "Processing file…"
-                  : "Ask a question about your portfolio…"
-              }
-              readOnly={isLoading || isUploading}
-              className="flex-1 min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent shadow-none py-2 px-1 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
-              rows={1}
-            />
-
-            {(isLoading || isUploading) && (
-              <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60 opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary/80" />
-                </span>
-                {isUploading ? "Uploading…" : "Analyzing…"}
-              </div>
-            )}
-
-            <div className="h-5 w-px bg-border shrink-0" />
-
-            <div className="flex items-center gap-1 shrink-0">
-              <label
-                htmlFor="live-data-toggle"
-                className="text-[10px] text-muted-foreground cursor-pointer whitespace-nowrap"
-              >
-                Live
-              </label>
-              <Switch
-                id="live-data-toggle"
-                checked={includeLiveData}
-                onCheckedChange={setIncludeLiveData}
-                className="scale-75 origin-right"
-              />
-            </div>
-
-            <Button
-              type="submit"
-              size="icon"
-              disabled={isLoading || isUploading || (!input.trim() && !currentUpload)}
-              className="h-8 w-8 rounded-full shrink-0"
-              title="Send"
-            >
-              <Send className="h-3.5 w-3.5" />
-            </Button>
-          </div>{/* end flex row */}
-          </div>{/* end gradient shell */}
-
-          <input
-            type="file"
-            ref={fileInputRef}
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-        </form>
+        <ChatInputBar
+          ref={chatInputRef}
+          isLoading={isLoading}
+          isUploading={isUploading}
+          includeLiveData={includeLiveData}
+          onIncludeLiveDataChange={setIncludeLiveData}
+          currentUpload={currentUpload}
+          onRemoveUpload={() => setCurrentUpload(null)}
+          onFileSelect={handleFileSelect}
+          onSubmit={handleSendMessage}
+          onAbort={handleAbort}
+        />
       </div>
 
       {hasCharts && (
         <ChartPagination
-          total={messages.reduce(
-            (acc, m) =>
-              acc + (m.charts?.length ?? 0) + (m.tables?.length ?? 0) +
-              (m.memos?.length ?? 0) + (m.narratives?.length ?? 0),
-            0
-          )}
+          total={chartPanelCount}
           current={currentChartIndex}
           onDotClick={scrollToChart}
         />
