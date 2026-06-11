@@ -161,6 +161,12 @@ enum PORTFOLIO_TYPE {
 }
 
 import { WEIDENTIFY_API_URL } from '@/lib/config';
+import {
+  ASSISTANT_NAME,
+  ASSISTANT_ERROR_MESSAGE,
+  finalizeAssistantMessage,
+  resolveAssistantDisplayContent,
+} from '@/lib/assistantMessage';
 
 const API_URL = WEIDENTIFY_API_URL;
 
@@ -303,7 +309,7 @@ const MessageComponent: React.FC<MessageComponentProps & {
     <div className={`flex justify-start ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
       <div className="flex flex-col min-w-0 w-[70%] min-w-[70%] max-w-[70%]">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[11px] font-semibold text-foreground">Chatbot</span>
+          <span className="text-[11px] font-semibold text-foreground">{ASSISTANT_NAME}</span>
           {!isThinking && (
             <span className="text-[9px] text-muted-foreground/55">{timeStr}</span>
           )}
@@ -488,16 +494,27 @@ export default function AIChat() {
       const res = await fetch(`/api/conversations/${convId}`);
       if (!res.ok) return;
       const data = await res.json();
-      const loaded: Message[] = data.messages.map((m: any) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        charts: Array.isArray(m.chartData) ? m.chartData : m.chartData ? [m.chartData] : undefined,
-        tables: Array.isArray(m.tableData) ? m.tableData : undefined,
-        memos: Array.isArray(m.memoData) ? m.memoData : undefined,
-        narratives: Array.isArray(m.narrativeData) ? m.narrativeData : undefined,
-        hasToolUse: m.hasToolUse ?? false,
-      }));
+      const loaded: Message[] = data.messages.map((m: any) => {
+        const charts = Array.isArray(m.chartData) ? m.chartData : m.chartData ? [m.chartData] : undefined;
+        const tables = Array.isArray(m.tableData) ? m.tableData : undefined;
+        const memos = Array.isArray(m.memoData) ? m.memoData : undefined;
+        const narratives = Array.isArray(m.narrativeData) ? m.narrativeData : undefined;
+        const visualPayload = { charts, tables, memos, narratives };
+        const content =
+          m.role === "assistant"
+            ? resolveAssistantDisplayContent(m.content, visualPayload) || m.content
+            : m.content;
+        return {
+          id: m.id,
+          role: m.role,
+          content,
+          charts,
+          tables,
+          memos,
+          narratives,
+          hasToolUse: m.hasToolUse ?? false,
+        };
+      });
       setMessages(loaded);
       setConversationId(convId);
       hasAutoInitialized.current = true;
@@ -682,9 +699,10 @@ export default function AIChat() {
         setMessages((prev) => {
           const out = [...prev];
           out[out.length - 1] = {
-            id: crypto.randomUUID(),
+            ...out[out.length - 1],
             role: "assistant",
-            content: "Initialization failed. Please try again.",
+            status: undefined,
+            content: ASSISTANT_ERROR_MESSAGE,
           };
           return out;
         });
@@ -692,13 +710,10 @@ export default function AIChat() {
       } finally {
         isInFlightRef.current = false;
         setIsLoading(false);
-        // Clear any message that got stuck in the "thinking" placeholder
         setMessages((prev) => {
           const out = [...prev];
-          const last = out[out.length - 1];
-          if (last?.role === "assistant" && last.content === "thinking") {
-            out[out.length - 1] = { ...last, status: undefined, content: "_(No response received. Please try again.)_" };
-          }
+          const finalized = finalizeAssistantMessage(out[out.length - 1]);
+          if (finalized) out[out.length - 1] = finalized as Message;
           return out;
         });
       }
@@ -967,22 +982,29 @@ export default function AIChat() {
           }
         }
 
-        // Apply charts and follow-ups after stream ends
-        if (pendingStream) {
-          setMessages((prev) => {
-            const out = [...prev];
-            out[out.length - 1] = {
-              ...out[out.length - 1],
-              hasToolUse: pendingStream!.hasToolUse,
-              charts: pendingStream!.charts.length > 0 ? pendingStream!.charts : undefined,
-              tables: pendingStream!.tables.length > 0 ? pendingStream!.tables : undefined,
-              memos: pendingStream!.memos.length > 0 ? pendingStream!.memos : undefined,
-              narratives: pendingStream!.narratives.length > 0 ? pendingStream!.narratives : undefined,
-              followUps: pendingStream!.followUps.length > 0 ? pendingStream!.followUps : undefined,
+        // Apply visual artifacts and resolve display text after stream ends
+        setMessages((prev) => {
+          const out = [...prev];
+          const last = out[out.length - 1];
+          if (!last || last.role !== "assistant") return out;
+
+          let updated: Message = { ...last };
+          if (pendingStream) {
+            updated = {
+              ...updated,
+              hasToolUse: pendingStream.hasToolUse,
+              charts: pendingStream.charts.length > 0 ? pendingStream.charts : undefined,
+              tables: pendingStream.tables.length > 0 ? pendingStream.tables : undefined,
+              memos: pendingStream.memos.length > 0 ? pendingStream.memos : undefined,
+              narratives: pendingStream.narratives.length > 0 ? pendingStream.narratives : undefined,
+              followUps: pendingStream.followUps.length > 0 ? pendingStream.followUps : undefined,
             };
-            return out;
-          });
-        }
+          }
+
+          const finalized = finalizeAssistantMessage(updated);
+          out[out.length - 1] = (finalized ?? updated) as Message;
+          return out;
+        });
       } catch (err: any) {
         if (err.name === "AbortError") {
           // Finalize any partial/thinking message so the UI isn't stuck
@@ -1077,7 +1099,7 @@ export default function AIChat() {
     ];
     for (const msg of messages) {
       if (msg.content === "thinking") continue;
-      lines.push(`### ${msg.role === "user" ? "You" : "Chatbot"}`);
+      lines.push(`### ${msg.role === "user" ? "You" : ASSISTANT_NAME}`);
       lines.push(msg.content);
       for (const chart of msg.charts ?? []) {
         if (chart.config?.title) { lines.push(""); lines.push(`_[Chart: ${chart.config.title}]_`); }
@@ -1217,25 +1239,23 @@ export default function AIChat() {
       setCurrentUpload(null);
     } catch {
       setMessages((prev) => {
-        const newMessages = [...prev];
-        newMessages[newMessages.length - 1] = {
-          id: crypto.randomUUID(),
+        const out = [...prev];
+        out[out.length - 1] = {
+          ...out[out.length - 1],
           role: "assistant",
-          content: "I encountered an error. Please try again.",
+          status: undefined,
+          content: ASSISTANT_ERROR_MESSAGE,
         };
-        return newMessages;
+        return out;
       });
     } finally {
       isInFlightRef.current = false;
       setIsLoading(false);
       setIsScrollLocked(false);
-      // Clear any message that got stuck in the "thinking" placeholder
       setMessages((prev) => {
         const out = [...prev];
-        const last = out[out.length - 1];
-        if (last?.role === "assistant" && last.content === "thinking") {
-          out[out.length - 1] = { ...last, status: undefined, content: "_(No response received. Please try again.)_" };
-        }
+        const finalized = finalizeAssistantMessage(out[out.length - 1]);
+        if (finalized) out[out.length - 1] = finalized as Message;
         return out;
       });
       requestAnimationFrame(() => {
@@ -1327,22 +1347,20 @@ export default function AIChat() {
       setMessages((prev) => {
         const out = [...prev];
         out[out.length - 1] = {
-          id: crypto.randomUUID(),
+          ...out[out.length - 1],
           role: "assistant",
-          content: "Initialization failed. Please try again.",
+          status: undefined,
+          content: ASSISTANT_ERROR_MESSAGE,
         };
         return out;
       });
     } finally {
       isInFlightRef.current = false;
       setIsLoading(false);
-      // Clear any message that got stuck in the "thinking" placeholder
       setMessages((prev) => {
         const out = [...prev];
-        const last = out[out.length - 1];
-        if (last?.role === "assistant" && last.content === "thinking") {
-          out[out.length - 1] = { ...last, status: undefined, content: "_(No response received. Please try again.)_" };
-        }
+        const finalized = finalizeAssistantMessage(out[out.length - 1]);
+        if (finalized) out[out.length - 1] = finalized as Message;
         return out;
       });
     }

@@ -5,6 +5,7 @@ import type { ChartData, TableData, MemoData, NarrativeData } from "@/types/char
 import { retryWithBackoff } from "@/lib/retry";
 import { maybeAlertLlmQuotaForError } from "@/lib/llmQuotaAlarm";
 import { internalApiKeyHeader } from "@/lib/internalApiKey";
+import { resolveAssistantDisplayContent } from "@/lib/assistantMessage";
 
 // ─── Portfolio data fetch ────────────────────────────────────────────────────
 
@@ -764,10 +765,18 @@ Focus on clear, actionable financial insights.`;
               ? lastMsg.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("")
               : "";
 
-            const assistantContent = (finalMessage.content as any[])
+            const assistantRawText = (finalMessage.content as any[])
               .filter((c: any) => c.type === "text")
               .map((c: any) => c.text)
               .join("");
+
+            const assistantContent =
+              resolveAssistantDisplayContent(assistantRawText, {
+                charts: processedCharts,
+                tables: processedTables,
+                memos: processedMemos,
+                narratives: processedNarratives,
+              }) || assistantRawText;
 
             const fileMetadata = fileData
               ? { fileName: fileData.fileName, mediaType: fileData.mediaType, isText: fileData.isText ?? false }

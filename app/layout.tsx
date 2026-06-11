@@ -58,6 +58,10 @@ export const metadata: Metadata = {
     },
   },
   metadataBase: new URL(BASE_URL),
+  icons: {
+    icon: "/ant-logo.svg",
+    shortcut: "/ant-logo.svg",
+  },
   alternates: {
     canonical: "/",
   },

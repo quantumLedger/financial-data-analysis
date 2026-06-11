@@ -1,6 +1,7 @@
 /**
  * Centralized configuration management
- * Loads environment variables from .env.local or .env.prod based on NODE_ENV
+ * Environment variables are loaded from .env via scripts/run-with-env.js (runtime)
+ * and dotenv in prisma.config.ts (migrations).
  */
 
 // Chat API Configuration
