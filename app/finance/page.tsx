@@ -600,7 +600,7 @@ const ChatInputBar = memo(
       onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
       onSubmit: (text: string) => void;
       onAbort: () => void;
-      formRef?: React.RefObject<HTMLFormElement | null>;
+      formRef?: React.Ref<HTMLFormElement>;
     }
   >(function ChatInputBar(
     {
