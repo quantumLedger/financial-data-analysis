@@ -94,7 +94,7 @@ const mdComponents: Components = {
       );
     }
     return (
-  <pre {...(props as React.HTMLAttributes<HTMLPreElement>)} className="bg-background/50 p-3 rounded overflow-auto my-2 text-[11px]">
+  <pre {...(props as React.HTMLAttributes<HTMLPreElement>)} className="bg-background/50 p-3 rounded overflow-x-auto overflow-y-hidden max-w-full my-2 text-[11px] whitespace-pre-wrap break-words">
         <code className={className}>{children}</code>
       </pre>
     );
@@ -342,7 +342,7 @@ const MessageComponent = memo(function MessageComponent({
       <div
         ref={bubbleInnerRef}
         style={{ maxHeight: MAX_MSG_HEIGHT }}
-        className={`overflow-hidden px-3 py-2.5 rounded-lg leading-relaxed ${
+        className={`overflow-hidden px-3 py-2.5 rounded-lg leading-relaxed break-words ${
           isUser
             ? "bg-primary text-primary-foreground text-[11px]"
             : "bg-muted/60 border backdrop-blur-sm text-[13.5px]"
@@ -393,13 +393,7 @@ const MessageComponent = memo(function MessageComponent({
         title={speakerLabel}
         subtitle={timeStr}
       >
-        <div
-          className={`rounded-lg px-3 py-2.5 leading-relaxed ${
-            isUser
-              ? "bg-primary text-primary-foreground text-[11px]"
-              : "bg-muted/60 border text-[13.5px]"
-          }`}
-        >
+        <div className="rounded-lg border bg-muted/30 px-3 py-2.5 leading-relaxed text-[13px] break-words">
           {isThinking ? (
             <span className="text-muted-foreground text-[11px]">{message.status ?? "Thinking"}</span>
           ) : (
