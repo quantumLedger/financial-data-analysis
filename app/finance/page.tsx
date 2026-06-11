@@ -536,25 +536,30 @@ const VisualizationPanel = memo(function VisualizationPanel({
           {items.map((item, idx) => (
             <div
               key={item.key}
-              className="relative w-full min-h-full flex-shrink-0 snap-start snap-always"
+              className="relative w-full min-h-full flex-shrink-0 snap-start snap-always flex flex-col"
               ref={idx === items.length - 1 ? chartEndRef : null}
             >
-              <div className="absolute top-3 right-3 z-10 flex flex-col items-end gap-1.5">
+              <div className="flex shrink-0 items-center gap-2 border-b border-border/70 bg-background px-3 py-1.5 z-10">
+                <p
+                  className="min-w-0 flex-1 truncate text-[9px] text-muted-foreground"
+                  title={item.query}
+                >
+                  {truncateQuery(item.query, 120)}
+                </p>
                 <Button
                   type="button"
                   variant="outline"
                   size="icon"
-                  className="h-8 w-8 bg-background/90 shadow-sm backdrop-blur-sm"
+                  className="h-7 w-7 shrink-0 bg-background shadow-sm"
                   title="Expand view"
                   onClick={() => setExpandedItem(item)}
                 >
                   <Maximize2 className="h-3.5 w-3.5" />
                 </Button>
-                <span className="max-w-[180px] rounded-md border bg-background/90 px-2 py-1 text-right text-[9px] text-muted-foreground shadow-sm backdrop-blur-sm line-clamp-2">
-                  {truncateQuery(item.query, 80)}
-                </span>
               </div>
-              {renderVisualizationContent(item)}
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {renderVisualizationContent(item)}
+              </div>
             </div>
           ))}
         </div>
@@ -889,6 +894,7 @@ export default function AIChat() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-6");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const chartEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<ChatInputHandle>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -896,7 +902,6 @@ export default function AIChat() {
   const [isUploading, setIsUploading] = useState(false);
   const [currentChartIndex, setCurrentChartIndex] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [isScrollLocked, setIsScrollLocked] = useState(false);
   const resizableContainerRef = useRef<HTMLDivElement>(null);
   const [includeLiveData, setIncludeLiveData] = useState(true);
 
@@ -1164,33 +1169,30 @@ export default function AIChat() {
     return () => clearTimeout(timer);
   }, [icfObj, proposedCsv, portfolioJson, loadingPortfolio, isLoading, messages.length, selectedModel, firmName, accountName, pdfUrl, includeLiveData, initializePromptHidden, initializePromptDisplay, ensureConversation]);
 
-  useEffect(() => {
-    const scrollToBottom = () => {
-      if (!messagesEndRef.current) return;
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "end",
-        });
-      });
-    };
-    const timeoutId = setTimeout(scrollToBottom, 100);
-    return () => clearTimeout(timeoutId);
-  }, [messages, isLoading]);
+  const scrollChatToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    });
+  }, []);
 
   useEffect(() => {
-    if (!messagesEndRef.current) return;
+    const timeoutId = setTimeout(() => scrollChatToBottom("smooth"), 50);
+    return () => clearTimeout(timeoutId);
+  }, [messages, isLoading, scrollChatToBottom]);
+
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const inner = el.querySelector("[data-chat-messages]");
+    if (!inner) return;
     const observer = new ResizeObserver(() => {
-      if (!isScrollLocked) {
-        messagesEndRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "end",
-        });
-      }
+      scrollChatToBottom("smooth");
     });
-    observer.observe(messagesEndRef.current);
+    observer.observe(inner);
     return () => observer.disconnect();
-  }, [isScrollLocked]);
+  }, [scrollChatToBottom, messages.length]);
 
   const handleChartScroll = useCallback(() => {
     if (!contentRef.current) return;
@@ -1604,7 +1606,6 @@ export default function AIChat() {
     if (!text.trim() && !currentUpload) return;
     if (isLoading || isUploading || isInFlightRef.current) return;
     isInFlightRef.current = true;
-    setIsScrollLocked(true);
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -1623,6 +1624,10 @@ export default function AIChat() {
     };
     setMessages((prev) => [...prev, userMessage, thinkingMessage]);
     setIsLoading(true);
+    requestAnimationFrame(() => {
+      scrollChatToBottom("auto");
+      requestAnimationFrame(() => scrollChatToBottom("smooth"));
+    });
     const apiMessages = [...messages, userMessage].map((msg) => {
       if (msg.file) {
         if (msg.file.isText) {
@@ -1678,19 +1683,13 @@ export default function AIChat() {
     } finally {
       isInFlightRef.current = false;
       setIsLoading(false);
-      setIsScrollLocked(false);
       setMessages((prev) => {
         const out = [...prev];
         const finalized = finalizeAssistantMessage(out[out.length - 1]);
         if (finalized) out[out.length - 1] = finalized as Message;
         return out;
       });
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "end",
-        });
-      });
+      scrollChatToBottom("smooth");
     }
   }, [
     currentUpload,
@@ -1702,6 +1701,7 @@ export default function AIChat() {
     includeLiveData,
     portfolioJson,
     ensureConversation,
+    scrollChatToBottom,
     callFinanceStream,
   ]);
 
@@ -2019,7 +2019,10 @@ export default function AIChat() {
             </div>
           </CardHeader>
 
-          <CardContent className="flex flex-1 flex-col overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory relative z-[6] pb-20 min-h-0">
+          <CardContent
+            ref={chatScrollRef}
+            className="flex flex-1 flex-col overflow-y-auto p-4 scroll-smooth relative z-[6] pb-36 min-h-0 scroll-pb-36"
+          >
             <div className="relative flex flex-1 flex-col min-h-0">
             {visibleMessages.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center animate-fade-in-up w-full max-w-sm mx-auto px-2">
@@ -2088,7 +2091,7 @@ export default function AIChat() {
                 </div>
               </div>
             ) : (
-              <div className="space-y-4 min-h-full">
+              <div className="space-y-4 min-h-full" data-chat-messages>
                 {visibleMessages.map((message, index) => (
                   <div
                     key={message.id}
