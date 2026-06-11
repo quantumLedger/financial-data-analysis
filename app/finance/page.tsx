@@ -394,7 +394,7 @@ const MessageComponent = memo(function MessageComponent({
         )}
       </div>
 
-      {(overflows || expandable) && !readMoreOpen && (
+      {overflows && !readMoreOpen && (
         <div
           className={`absolute bottom-0 left-0 right-0 h-14 flex items-end justify-center pb-2 rounded-b-lg bg-gradient-to-t to-transparent ${
             isUser ? "from-primary/90" : "from-muted/95"
@@ -600,6 +600,7 @@ const ChatInputBar = memo(
       onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
       onSubmit: (text: string) => void;
       onAbort: () => void;
+      formRef?: React.RefObject<HTMLFormElement | null>;
     }
   >(function ChatInputBar(
     {
@@ -612,6 +613,7 @@ const ChatInputBar = memo(
       onFileSelect,
       onSubmit,
       onAbort,
+      formRef,
     },
     ref
   ) {
@@ -665,6 +667,7 @@ const ChatInputBar = memo(
 
     return (
       <form
+        ref={formRef}
         onSubmit={handleFormSubmit}
         className="absolute bottom-5 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl z-50"
       >
@@ -895,6 +898,8 @@ export default function AIChat() {
   const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-6");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatInputFormRef = useRef<HTMLFormElement>(null);
+  const [chatInputClearance, setChatInputClearance] = useState(120);
   const chartEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<ChatInputHandle>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -1176,6 +1181,20 @@ export default function AIChat() {
       el.scrollTo({ top: el.scrollHeight, behavior });
     });
   }, []);
+
+  useEffect(() => {
+    const form = chatInputFormRef.current;
+    if (!form) return;
+    const measure = () => {
+      const bottomOffset = 20;
+      const gap = 12;
+      setChatInputClearance(form.offsetHeight + bottomOffset + gap);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(form);
+    return () => observer.disconnect();
+  }, [currentUpload, isLoading, isUploading]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => scrollChatToBottom("smooth"), 50);
@@ -2021,7 +2040,11 @@ export default function AIChat() {
 
           <CardContent
             ref={chatScrollRef}
-            className="flex flex-1 flex-col overflow-y-auto p-4 scroll-smooth relative z-[6] pb-36 min-h-0 scroll-pb-36"
+            className="flex flex-1 flex-col overflow-y-auto p-4 scroll-smooth relative z-[6] min-h-0"
+            style={{
+              paddingBottom: chatInputClearance,
+              scrollPaddingBottom: chatInputClearance,
+            }}
           >
             <div className="relative flex flex-1 flex-col min-h-0">
             {visibleMessages.length === 0 ? (
@@ -2228,6 +2251,7 @@ export default function AIChat() {
 
         <ChatInputBar
           ref={chatInputRef}
+          formRef={chatInputFormRef}
           isLoading={isLoading}
           isUploading={isUploading}
           includeLiveData={includeLiveData}
