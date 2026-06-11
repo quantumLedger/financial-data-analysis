@@ -1,7 +1,7 @@
 export const ASSISTANT_NAME = "Inspolio Copilot";
 
 export const ASSISTANT_ERROR_MESSAGE =
-  "Something went wrong and I couldn't complete your request. Please try again.";
+  "Something went wrong and I could not complete your request. Please try again.";
 
 export type VisualPayload = {
   charts?: unknown[] | null;
@@ -40,12 +40,12 @@ export function buildVisualOnlyMessage(payload: VisualPayload): string {
   }
 
   if (kinds.length === 1) {
-    return `For your query above, I've generated ${kinds[0]} — explore it in the panel on the right.`;
+    return `For your query above, I have generated ${kinds[0]}. Explore it in the panel on the right.`;
   }
 
   const last = kinds.pop();
   const summary = kinds.length > 0 ? `${kinds.join(", ")} and ${last}` : (last ?? "results");
-  return `For your query above, I've generated ${summary} — explore them in the panel on the right.`;
+  return `For your query above, I have generated ${summary}. Explore them in the panel on the right.`;
 }
 
 /**

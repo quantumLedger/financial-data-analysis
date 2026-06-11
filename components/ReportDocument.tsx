@@ -225,7 +225,7 @@ const styles = StyleSheet.create({
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function formatValue(value: unknown, type: string): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "Not available";
   if (type === "currency") {
     const n = Number(value);
     if (isNaN(n)) return String(value);
@@ -340,7 +340,7 @@ function ChartDataSection({ chart }: { chart: ChartData }) {
       <Text style={styles.chartTitle}>{chart.config.title}</Text>
       {chart.config.description ? <Text style={styles.body}>{chart.config.description}</Text> : null}
       <Text style={styles.chartNote}>
-        Interactive chart available in the Financial Assistant application.
+        Interactive chart available in the Financial AI Assistant application.
       </Text>
       {chart.data.length > 0 && dataKeys.length > 0 ? (
         <View style={styles.tableWrap}>
@@ -371,7 +371,7 @@ function ChartDataSection({ chart }: { chart: ChartData }) {
 function Footer({ firmName }: { firmName: string }) {
   return (
     <View style={styles.pageFooter} fixed>
-      <Text style={styles.pageFooterText}>{firmName || "Financial Assistant"}</Text>
+      <Text style={styles.pageFooterText}>{firmName || "Financial AI Assistant"}</Text>
       <Text
         style={styles.pageFooterText}
         render={({ pageNumber, totalPages }: { pageNumber: number; totalPages: number }) =>
@@ -404,7 +404,7 @@ export function ReportDocument({
     .join(", ");
 
   return (
-    <Document title={reportTitle} creator="Financial Assistant">
+    <Document title={reportTitle} creator="Financial AI Assistant">
       {/* ── Cover page ─────────────────────────────────── */}
       <Page size="A4" style={styles.page}>
         <View style={styles.coverWrap}>

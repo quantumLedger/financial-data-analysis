@@ -40,7 +40,7 @@ export function ReportGenerator({ messages, clientName, firmName }: ReportGenera
     if (!reportTitle && hasContent) {
       setReportTitle(
         clientName
-          ? `${clientName} — Investment Report`
+          ? `${clientName} Investment Report`
           : "Investment Report"
       );
     }
@@ -144,7 +144,7 @@ export function ReportGenerator({ messages, clientName, firmName }: ReportGenera
               if (e.key === "Escape") setShowForm(false);
             }}
             className="w-full text-[11px] border rounded px-2 py-1.5 mb-2.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder="Report title..."
+            placeholder="Report title"
           />
           <Button
             size="sm"
@@ -155,7 +155,7 @@ export function ReportGenerator({ messages, clientName, firmName }: ReportGenera
             {generating ? (
               <>
                 <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
-                Generating…
+                Generating report
               </>
             ) : (
               "Download PDF"

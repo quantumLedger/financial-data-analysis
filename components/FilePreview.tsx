@@ -23,10 +23,8 @@ const FilePreview: React.FC<FilePreviewProps> = ({
   const fileExtension = file.fileName.split(".").pop()?.toLowerCase() || "";
 
   const truncatedName =
-    file.fileName.length > 7
-      ? `${file.fileName.slice(0, 7)}...${file.fileName.slice(
-          file.fileName.lastIndexOf("."),
-        )}`
+    file.fileName.length > 20
+      ? `${file.fileName.slice(0, 17)}${file.fileName.slice(file.fileName.lastIndexOf("."))}`
       : file.fileName;
 
   const imageUrl = isImage

@@ -21,17 +21,24 @@ import {
   FileInput,
   MessageCircleQuestion,
   ChartColumnBig,
-  Loader2,
   FileText,
   FileDown,
+  Maximize2,
+  BarChart3,
+  LineChart,
+  PieChart,
+  Table2,
+  ScrollText,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { ContentModal } from "@/components/ContentModal";
+import { PanelResizer } from "@/components/PanelResizer";
 import FilePreview from "@/components/FilePreview";
 import { ChartRenderer } from "@/components/ChartRenderer";
 import { DataTableRenderer } from "@/components/DataTableRenderer";
 import { MemoRenderer } from "@/components/MemoRenderer";
 import { NarrativeCard } from "@/components/NarrativeCard";
 import { toast } from "@/hooks/use-toast";
-import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -146,7 +153,7 @@ const models: Model[] = [
   {
     id: "claude-sonnet-4-6",
     name: "Inspolio's Sonnet 4.6",
-    description: "Best default—strong quality with fast responses for most finance work.",
+    description: "Best default. Strong quality with fast responses for most finance work.",
   },
   {
     id: "claude-haiku-4-5-20251001",
@@ -215,6 +222,84 @@ const SafeChartRenderer = memo(function SafeChartRenderer({ data }: { data: Char
 });
 
 const MAX_MSG_HEIGHT = 400;
+const QUERY_TRUNCATE_LEN = 140;
+
+const VISUALIZATION_FEATURES: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+}[] = [
+  {
+    icon: BarChart3,
+    title: "Bar Charts",
+    description:
+      "AI ranks your largest stock positions and sector weights in a clear side-by-side view.",
+  },
+  {
+    icon: ChartArea,
+    title: "Area Charts",
+    description:
+      "See how your equity portfolio value and allocation evolve over time, built from your holdings data.",
+  },
+  {
+    icon: LineChart,
+    title: "Linear Charts",
+    description:
+      "AI traces performance trends across your stocks to highlight momentum, dips, and turning points.",
+  },
+  {
+    icon: PieChart,
+    title: "Pie Charts",
+    description:
+      "Get an instant AI snapshot of how your portfolio is distributed across sectors and asset classes.",
+  },
+  {
+    icon: Table2,
+    title: "Data Tables",
+    description:
+      "AI structures your holdings, weights, and key metrics into exportable tables from portfolio files.",
+  },
+  {
+    icon: ScrollText,
+    title: "Memos and Narratives",
+    description:
+      "Receive AI-drafted investment memos and narrative summaries written around your stock portfolio.",
+  },
+];
+
+function RectLoader({
+  size = "md",
+  className = "",
+}: {
+  size?: "sm" | "md" | "lg";
+  className?: string;
+}) {
+  const sizeClass =
+    size === "sm" ? "h-3 w-3" : size === "lg" ? "h-4 w-4" : "h-3.5 w-3.5";
+  return (
+    <span
+      className={`inline-block shrink-0 rounded-[2px] border-2 border-muted-foreground/20 border-t-muted-foreground animate-spin ${sizeClass} ${className}`}
+      aria-hidden
+    />
+  );
+}
+
+function truncateQuery(text: string, max = QUERY_TRUNCATE_LEN): string {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "Portfolio analysis";
+  if (cleaned.length <= max) return cleaned;
+  return cleaned.slice(0, max);
+}
+
+function getQueryForMessageIndex(messages: Message[], msgIdx: number): string {
+  for (let i = msgIdx; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.role === "user" && msg.content && msg.content !== "thinking") {
+      return msg.content;
+    }
+  }
+  return "Portfolio analysis";
+}
 
 const MessageComponent = memo(function MessageComponent({
   message,
@@ -231,9 +316,10 @@ const MessageComponent = memo(function MessageComponent({
 }) {
   const isUser = message.role === "user";
   const isThinking = message.content === "thinking";
-  const [expanded, setExpanded] = useState(false);
+  const [readMoreOpen, setReadMoreOpen] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const bubbleInnerRef = useRef<HTMLDivElement>(null);
+  const speakerLabel = isUser ? "You" : ASSISTANT_NAME;
 
   const timeStr = message.timestamp
     ? new Date(message.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
@@ -255,7 +341,7 @@ const MessageComponent = memo(function MessageComponent({
     <div className="relative w-full">
       <div
         ref={bubbleInnerRef}
-        style={{ maxHeight: expanded ? undefined : MAX_MSG_HEIGHT }}
+        style={{ maxHeight: MAX_MSG_HEIGHT }}
         className={`overflow-hidden px-3 py-2.5 rounded-lg leading-relaxed ${
           isUser
             ? "bg-primary text-primary-foreground text-[11px]"
@@ -264,8 +350,8 @@ const MessageComponent = memo(function MessageComponent({
       >
         {isThinking ? (
           <div className="flex items-center gap-2 text-muted-foreground">
-            <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-current flex-shrink-0" />
-            <span className="text-[11px]">{message.status ?? "Thinking…"}</span>
+            <RectLoader />
+            <span className="text-[11px]">{message.status ?? "Thinking"}</span>
           </div>
         ) : (
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
@@ -274,71 +360,121 @@ const MessageComponent = memo(function MessageComponent({
         )}
       </div>
 
-      {overflows && !expanded && (
-        <div className="absolute bottom-0 left-0 right-0 h-14 flex items-end justify-center pb-2 rounded-b-lg bg-gradient-to-t from-white/80 to-transparent">
+      {overflows && !readMoreOpen && (
+        <div
+          className={`absolute bottom-0 left-0 right-0 h-14 flex items-end justify-center pb-2 rounded-b-lg bg-gradient-to-t to-transparent ${
+            isUser ? "from-primary/90" : "from-muted/95"
+          }`}
+        >
           <button
-            onClick={() => setExpanded(true)}
+            type="button"
+            onClick={() => setReadMoreOpen(true)}
             className="text-[10px] font-semibold px-3 py-1 rounded-full border border-black bg-black text-white hover:bg-neutral-800 shadow-sm transition-colors"
           >
-            Read more ↓
+            Read more
           </button>
         </div>
       )}
     </div>
   );
 
+  const bubbleBlock = (
+    <>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[11px] font-semibold text-foreground">{speakerLabel}</span>
+        {!isThinking && (
+          <span className="text-[9px] text-muted-foreground/55">{timeStr}</span>
+        )}
+      </div>
+      {bubble}
+      <ContentModal
+        open={readMoreOpen}
+        onClose={() => setReadMoreOpen(false)}
+        title={speakerLabel}
+        subtitle={timeStr}
+      >
+        <div
+          className={`rounded-lg px-3 py-2.5 leading-relaxed ${
+            isUser
+              ? "bg-primary text-primary-foreground text-[11px]"
+              : "bg-muted/60 border text-[13.5px]"
+          }`}
+        >
+          {isThinking ? (
+            <span className="text-muted-foreground text-[11px]">{message.status ?? "Thinking"}</span>
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+              {message.content}
+            </ReactMarkdown>
+          )}
+        </div>
+      </ContentModal>
+    </>
+  );
+
   if (isUser) {
     return (
       <div className={`flex justify-end ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
         <div className="flex flex-col min-w-0 w-[70%] min-w-[70%] max-w-[70%]">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[11px] font-semibold text-foreground">You</span>
-              {!isThinking && (
-                <span className="text-[9px] text-muted-foreground/55">{timeStr}</span>
-              )}
-            </div>
-            {bubble}
-            {overflows && expanded && (
-              <button
-                onClick={() => setExpanded(false)}
-                className="mt-1.5 self-center text-[10px] font-semibold bg-black border border-black text-white hover:bg-neutral-800 transition-colors px-3 py-1 rounded-full shadow-sm"
-              >
-                Show less ↑
-              </button>
-            )}
+          {bubbleBlock}
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`flex justify-start ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
-      <div className="flex flex-col min-w-0 w-[70%] min-w-[70%] max-w-[70%]">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[11px] font-semibold text-foreground">{ASSISTANT_NAME}</span>
-          {!isThinking && (
-            <span className="text-[9px] text-muted-foreground/55">{timeStr}</span>
-          )}
-        </div>
-        {bubble}
-        {overflows && expanded && (
-          <button
-            onClick={() => setExpanded(false)}
-            className="mt-1.5 self-center text-[10px] font-semibold bg-black border border-black text-white hover:bg-neutral-800 transition-colors px-3 py-1 rounded-full shadow-sm"
-          >
-            Show less ↑
-          </button>
-        )}
+    <div className={`flex justify-start w-full ${isCollapsed && isOldMessage && messageIndex < totalMessages - 5 ? "opacity-60" : ""}`}>
+      <div className="flex flex-col min-w-0 w-full max-w-full">
+        {bubbleBlock}
       </div>
     </div>
   );
 });
 
 type PanelItem =
-  | { type: "chart"; data: ChartData; key: string }
-  | { type: "table"; data: TableData; key: string }
-  | { type: "memo"; data: MemoData; key: string }
-  | { type: "narrative"; data: NarrativeData; key: string };
+  | { type: "chart"; data: ChartData; key: string; title: string; query: string }
+  | { type: "table"; data: TableData; key: string; title: string; query: string }
+  | { type: "memo"; data: MemoData; key: string; title: string; query: string }
+  | { type: "narrative"; data: NarrativeData; key: string; title: string; query: string };
+
+function renderVisualizationContent(item: PanelItem, expanded = false) {
+  const pad = expanded ? "p-2" : "p-6";
+  const width = expanded ? "w-full" : "w-[90%]";
+  switch (item.type) {
+    case "chart":
+      return (
+        <div className={`w-full h-full ${pad} flex flex-col`}>
+          <div className={`${width} flex-1 mx-auto`}>
+            <SafeChartRenderer data={item.data} />
+          </div>
+        </div>
+      );
+    case "table":
+      return (
+        <div className={`w-full h-full ${pad} flex flex-col`}>
+          <div className={`${width} mx-auto`}>
+            <DataTableRenderer data={item.data} />
+          </div>
+        </div>
+      );
+    case "memo":
+      return (
+        <div className={`w-full h-full ${pad} flex flex-col`}>
+          <div className={`${width} flex-1 mx-auto`}>
+            <MemoRenderer data={item.data} />
+          </div>
+        </div>
+      );
+    case "narrative":
+      return (
+        <div className={`w-full h-full ${pad} flex flex-col`}>
+          <div className={`${width} mx-auto`}>
+            <NarrativeCard data={item.data} />
+          </div>
+        </div>
+      );
+  }
+}
 
 const VisualizationPanel = memo(function VisualizationPanel({
   items,
@@ -351,45 +487,57 @@ const VisualizationPanel = memo(function VisualizationPanel({
   contentRef: React.RefObject<HTMLDivElement>;
   chartEndRef: React.RefObject<HTMLDivElement>;
 }) {
+  const [expandedItem, setExpandedItem] = useState<PanelItem | null>(null);
+
   return (
-    <CardContent
-      ref={contentRef}
-      className="flex-1 overflow-y-auto min-h-0 snap-y snap-mandatory pb-20 relative z-[6]"
-      onScroll={onScroll}
-    >
-      <div className="min-h-full flex flex-col">
-        {items.map((item, idx) => (
-          <div
-            key={item.key}
-            className="w-full min-h-full flex-shrink-0 snap-start snap-always"
-            ref={idx === items.length - 1 ? chartEndRef : null}
-          >
-            {item.type === "chart" && <SafeChartRenderer data={item.data} />}
-            {item.type === "table" && (
-              <div className="w-full h-full p-6 flex flex-col">
-                <div className="w-[90%] mx-auto">
-                  <DataTableRenderer data={item.data} />
-                </div>
+    <>
+      <CardContent
+        ref={contentRef}
+        className="flex-1 overflow-y-auto min-h-0 snap-y snap-mandatory pb-20 relative z-[6]"
+        onScroll={onScroll}
+      >
+        <div className="min-h-full flex flex-col">
+          {items.map((item, idx) => (
+            <div
+              key={item.key}
+              className="relative w-full min-h-full flex-shrink-0 snap-start snap-always"
+              ref={idx === items.length - 1 ? chartEndRef : null}
+            >
+              <div className="absolute top-3 right-3 z-10 flex flex-col items-end gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8 bg-background/90 shadow-sm backdrop-blur-sm"
+                  title="Expand view"
+                  onClick={() => setExpandedItem(item)}
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </Button>
+                <span className="max-w-[180px] rounded-md border bg-background/90 px-2 py-1 text-right text-[9px] text-muted-foreground shadow-sm backdrop-blur-sm line-clamp-2">
+                  {truncateQuery(item.query, 80)}
+                </span>
               </div>
-            )}
-            {item.type === "memo" && (
-              <div className="w-full h-full p-6 flex flex-col">
-                <div className="w-[90%] flex-1 mx-auto">
-                  <MemoRenderer data={item.data} />
-                </div>
-              </div>
-            )}
-            {item.type === "narrative" && (
-              <div className="w-full h-full p-6 flex flex-col">
-                <div className="w-[90%] mx-auto">
-                  <NarrativeCard data={item.data} />
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </CardContent>
+              {renderVisualizationContent(item)}
+            </div>
+          ))}
+        </div>
+      </CardContent>
+
+      <ContentModal
+        open={expandedItem != null}
+        onClose={() => setExpandedItem(null)}
+        title={expandedItem?.title ?? "Visualization"}
+        subtitle={
+          expandedItem
+            ? `Query: ${truncateQuery(expandedItem.query)}`
+            : undefined
+        }
+        className="max-w-5xl"
+      >
+        {expandedItem ? renderVisualizationContent(expandedItem, true) : null}
+      </ContentModal>
+    </>
   );
 });
 
@@ -520,10 +668,10 @@ const ChatInputBar = memo(
               onKeyDown={handleKeyDown}
               placeholder={
                 isLoading
-                  ? "Generating analysis…"
+                  ? "Generating analysis"
                   : isUploading
-                    ? "Processing file…"
-                    : "Ask a question about your portfolio…"
+                    ? "Processing file"
+                    : "Ask a question about your portfolio"
               }
               readOnly={isLoading || isUploading}
               className="flex-1 min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent shadow-none py-2 px-1 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
@@ -532,11 +680,8 @@ const ChatInputBar = memo(
 
             {(isLoading || isUploading) && (
               <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60 opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary/80" />
-                </span>
-                {isUploading ? "Uploading…" : "Analyzing…"}
+                <RectLoader size="sm" />
+                {isUploading ? "Uploading file" : "Analyzing request"}
               </div>
             )}
 
@@ -547,7 +692,7 @@ const ChatInputBar = memo(
                 htmlFor="live-data-toggle"
                 className="text-[10px] text-muted-foreground cursor-pointer whitespace-nowrap"
               >
-                Live
+                Live data
               </label>
               <Switch
                 id="live-data-toggle"
@@ -633,12 +778,12 @@ const DEFAULT_ICF_MAPPING = {
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
   const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
   return new Date(iso).toLocaleDateString();
 }
 
@@ -789,7 +934,7 @@ export default function AIChat() {
           firmName,
           accountName,
           title: firstUserContent.startsWith("Initialize memory")
-            ? `Portfolio Analysis · ${new Date().toLocaleDateString()}`
+            ? `Portfolio Analysis for ${new Date().toLocaleDateString()}`
             : firstUserContent.slice(0, 60) || "New Conversation",
         }),
       });
@@ -804,7 +949,7 @@ export default function AIChat() {
     }
   }, [conversationId, clientId, bankerId, firmName, accountName]);
 
-  const initializePromptDisplay = `Initialize memory and analyze data for ${accountName} at ${firmName}. (details hidden)`;
+  const initializePromptDisplay = `Initialize portfolio data for the selected client and firm. Client: ${accountName}. Firm name: ${firmName}.`;
 
   const initializePromptHidden = useMemo(() => {
     const payload = {
@@ -868,7 +1013,7 @@ export default function AIChat() {
         );
         setPortfolioJson(data);
       } catch {
-        setPortfolioError("Failed loading portfolio data");
+        setPortfolioError("Portfolio data could not be loaded. Please try again.");
       } finally {
         setLoadingPortfolio(false);
       }
@@ -1107,7 +1252,7 @@ export default function AIChat() {
     if (file.type === "application/pdf") {
       loadingToastRef = toast({
         title: "Processing PDF",
-        description: "Extracting text content...",
+        description: "Extracting text content from the file",
         duration: Infinity,
       });
     }
@@ -1318,7 +1463,7 @@ export default function AIChat() {
   // Default title when conversation is available
   useEffect(() => {
     const convTitle = conversations.find((c) => c.id === conversationId)?.title;
-    setExportTitle(convTitle ?? (accountName ? `${accountName} — Analysis` : "Conversation"));
+    setExportTitle(convTitle ?? (accountName ? `${accountName} Analysis` : "Conversation"));
   }, [conversationId, conversations, accountName]);
 
   // Close on outside click
@@ -1535,10 +1680,44 @@ export default function AIChat() {
   const visualizationItems = useMemo(() => {
     const items: PanelItem[] = [];
     messages.forEach((message, msgIdx) => {
-      (message.charts ?? []).forEach((d, i) => items.push({ type: "chart", data: d, key: `chart-${msgIdx}-${i}` }));
-      (message.tables ?? []).forEach((d, i) => items.push({ type: "table", data: d, key: `table-${msgIdx}-${i}` }));
-      (message.memos ?? []).forEach((d, i) => items.push({ type: "memo", data: d, key: `memo-${msgIdx}-${i}` }));
-      (message.narratives ?? []).forEach((d, i) => items.push({ type: "narrative", data: d, key: `narrative-${msgIdx}-${i}` }));
+      if (message.role !== "assistant") return;
+      const query = getQueryForMessageIndex(messages, msgIdx);
+      (message.charts ?? []).forEach((d, i) =>
+        items.push({
+          type: "chart",
+          data: d,
+          key: `chart-${msgIdx}-${i}`,
+          title: d.config?.title || "Chart",
+          query,
+        })
+      );
+      (message.tables ?? []).forEach((d, i) =>
+        items.push({
+          type: "table",
+          data: d,
+          key: `table-${msgIdx}-${i}`,
+          title: d.title || "Data Table",
+          query,
+        })
+      );
+      (message.memos ?? []).forEach((d, i) =>
+        items.push({
+          type: "memo",
+          data: d,
+          key: `memo-${msgIdx}-${i}`,
+          title: d.title || "Memo",
+          query,
+        })
+      );
+      (message.narratives ?? []).forEach((d, i) =>
+        items.push({
+          type: "narrative",
+          data: d,
+          key: `narrative-${msgIdx}-${i}`,
+          title: truncateQuery(d.narrative || "Narrative", 60),
+          query,
+        })
+      );
     });
     return items;
   }, [messages]);
@@ -1619,9 +1798,10 @@ export default function AIChat() {
         ref={resizableContainerRef}
         className="flex-1 flex bg-background mt-0 pt-2 min-h-0 resizable-container relative px-3 pb-2"
       >
+        <div className="flex flex-1 min-h-0 overflow-hidden rounded-xl border bg-card shadow-sm">
         <Card 
-          className={`flex flex-col h-full mr-2 relative overflow-hidden ${isResizing ? "" : "transition-[width] duration-150"}`}
-          style={{ width: `calc(${leftPanelWidth}% - 0.5rem)` }}
+          className={`flex flex-col h-full shrink-0 border-0 shadow-none rounded-none relative overflow-hidden ${isResizing ? "" : "transition-[width] duration-150"}`}
+          style={{ width: `${leftPanelWidth}%` }}
         >
           {/* Always-on ambient bubble — pink/blue AI-flow during API calls */}
           <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-hidden>
@@ -1657,7 +1837,7 @@ export default function AIChat() {
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div>
-                  <CardTitle className="text-[16px]">Financial Assistant</CardTitle>
+                  <CardTitle className="text-[16px]">Financial AI Assistant</CardTitle>
                   <CardDescription className="text-[13px]">
                     Powered by weidentify.ai
                   </CardDescription>
@@ -1738,8 +1918,8 @@ export default function AIChat() {
                     >
                       {loadingConversation ? (
                         <div className="flex items-center gap-1.5">
-                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current flex-shrink-0" />
-                          <span>Loading...</span>
+                          <RectLoader size="sm" />
+                          <span>Loading conversation</span>
                         </div>
                       ) : (
                         <>
@@ -1762,7 +1942,7 @@ export default function AIChat() {
                           {c.title}
                         </span>
                         <span className="text-[10px] text-muted-foreground">
-                          {relativeTime(c.updatedAt)} · {c._count.messages} messages
+                          {relativeTime(c.updatedAt)}, {c._count.messages} messages
                         </span>
                       </DropdownMenuItem>
                     ))}
@@ -1784,52 +1964,24 @@ export default function AIChat() {
             )}
           </CardHeader>
 
-          <CardContent className="flex-1 overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory relative z-[6] pb-20">
-            <div
-              className="pointer-events-none absolute inset-0 z-[5] overflow-hidden transition-opacity duration-700"
-              aria-hidden
-              style={{ opacity: isLoading ? 1 : 0 }}
-            >
-              <div
-                className="absolute -inset-[28%] animate-fda-bubble-1"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(125deg, rgba(99, 102, 241, 0.4) 0%, rgba(139, 92, 246, 0.28) 40%, transparent 72%)",
-                }}
-              />
-              <div
-                className="absolute -inset-[24%] animate-fda-bubble-2"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(215deg, rgba(59, 130, 246, 0.36) 0%, rgba(14, 165, 233, 0.22) 45%, transparent 70%)",
-                }}
-              />
-              <div
-                className="absolute -inset-[20%] animate-fda-bubble-3"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(55deg, rgba(236, 72, 153, 0.34) 0%, rgba(168, 85, 247, 0.24) 42%, transparent 68%)",
-                }}
-              />
-              <div
-                className="absolute -inset-[22%] animate-fda-bubble-4"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(310deg, rgba(20, 184, 166, 0.3) 0%, rgba(99, 102, 241, 0.2) 50%, transparent 65%)",
-                }}
-              />
-            </div>
-            <div className="relative z-[6] min-h-full">
+          <CardContent className="flex flex-1 flex-col overflow-y-auto p-4 scroll-smooth snap-y snap-mandatory relative z-[6] pb-20 min-h-0">
+            <div className="relative flex flex-1 flex-col min-h-0">
             {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full animate-fade-in-up max-w-[95%] mx-auto">
-                <h2 className="text-[16px] mb-6">
-                  Identify AI's Financial Assistant
+              <div className="flex flex-1 flex-col items-center justify-center animate-fade-in-up w-full max-w-sm mx-auto px-2">
+                <h2 className="text-[19px] font-medium text-center mb-6 w-full">
+                  Getting Started with Inspolio Copilot
                 </h2>
-                <div className="w-full max-w-sm mx-auto border rounded-lg p-4 mb-6">
-                  <div className="text-[12px] mb-2">
-                    Initialize data for{" "}
-                    <span className="font-medium">{accountName}</span> at{" "}
-                    <span className="font-medium">{firmName}</span>
+                <div className="w-full border rounded-lg p-4">
+                  <div className="text-[12px] mb-3 text-center space-y-1.5">
+                    <p>Initialize portfolio data for the selected client and firm.</p>
+                    <p>
+                      <span className="text-muted-foreground">Client: </span>
+                      <span className="font-medium">{accountName}</span>
+                    </p>
+                    <p>
+                      <span className="text-muted-foreground">Firm name: </span>
+                      <span className="font-medium">{firmName}</span>
+                    </p>
                   </div>
                   <Button
                     className="w-full text-[11px]"
@@ -1841,35 +1993,40 @@ export default function AIChat() {
                       isLoading
                     }
                   >
-                    {loadingPortfolio
-                      ? "Loading Portfolio..."
-                      : "Initialize and Analyze (Proposed)"}
+                    {loadingPortfolio ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <RectLoader size="sm" />
+                        Loading portfolio data
+                      </span>
+                    ) : (
+                      "Initialize and analyze proposed portfolio"
+                    )}
                   </Button>
                   {portfolioError ? (
-                    <div className="text-[11px] text-red-500 mt-2">
+                    <div className="text-[11px] text-red-500 mt-2 text-center">
                       {portfolioError}
                     </div>
                   ) : null}
                 </div>
-                <div className="space-y-6 text-[12px]">
+                <div className="mt-8 w-full space-y-6 text-[12px]">
                   <div className="flex items-center gap-3">
-                    <ChartArea className="text-muted-foreground w-6 h-6" />
+                    <ChartArea className="text-muted-foreground w-6 h-6 shrink-0" />
                     <p className="text-muted-foreground">
                       I can analyze financial data and create visualizations
                       from your files.
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <FileInput className="text-muted-foreground w-6 h-6" />
+                    <FileInput className="text-muted-foreground w-6 h-6 shrink-0" />
                     <p className="text-muted-foreground">
-                      Upload CSVs, PDFs, or images and I&apos;ll help you
+                      Upload CSV, PDF, or image files and I will help you
                       understand the data.
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <MessageCircleQuestion className="text-muted-foreground w-6 h-6" />
+                    <MessageCircleQuestion className="text-muted-foreground w-6 h-6 shrink-0" />
                     <p className="text-muted-foreground">
-                      Ask questions about your financial data and I&apos;ll
+                      Ask questions about your financial data and I will
                       create insightful charts.
                     </p>
                   </div>
@@ -1912,26 +2069,17 @@ export default function AIChat() {
           </CardContent>
         </Card>
 
-        {/* Resizable divider */}
-        <div
-          className={`w-1 bg-border hover:bg-primary/50 cursor-col-resize transition-colors relative group flex-shrink-0 select-none ${
-            isResizing ? 'bg-primary' : ''
-          }`}
+        <PanelResizer
+          isResizing={isResizing}
           onMouseDown={(e) => {
             e.preventDefault();
             e.stopPropagation();
             setIsResizing(true);
           }}
-          style={{ userSelect: 'none' }}
-        >
-          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-8 -ml-4 flex items-center justify-center pointer-events-none">
-            <div className="w-1 h-12 bg-muted-foreground/30 rounded-full group-hover:bg-primary/50 transition-colors" />
-          </div>
-        </div>
+        />
 
         <Card 
-          className={`flex flex-col h-full overflow-hidden ml-2 relative ${isResizing ? "" : "transition-[width] duration-150"}`}
-          style={{ width: `calc(${100 - leftPanelWidth}% - 0.5rem)` }}
+          className={`flex flex-1 min-w-0 flex-col h-full overflow-hidden border-0 shadow-none rounded-none relative ${isResizing ? "" : "transition-[width] duration-150"}`}
         >
           {/* Always-on ambient bubble — pink/blue AI-flow during API calls */}
           <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-hidden>
@@ -1966,7 +2114,7 @@ export default function AIChat() {
 
           {hasCharts && (
             <CardHeader className="py-3 px-4 shrink-0 relative z-[6]">
-              <CardTitle className="text-h6">Analysis & Visualizations</CardTitle>
+              <CardTitle className="text-[14px]">Inspolio&apos;s AI Visualizer</CardTitle>
             </CardHeader>
           )}
 
@@ -1980,31 +2128,43 @@ export default function AIChat() {
           ) : (
             <CardContent
               ref={contentRef}
-              className="flex-1 overflow-y-auto min-h-0 snap-y snap-mandatory pb-20 relative z-[6]"
+              className="flex flex-1 flex-col overflow-y-auto min-h-0 snap-y snap-mandatory pb-20 relative z-[6]"
               onScroll={handleChartScroll}
             >
-              <div className="h-full flex flex-col items-center justify-center text-center">
-                <div className="flex flex-col items-center justify-center gap-4 -translate-y-8">
-                  <ChartColumnBig className="w-8 h-8 text-muted-foreground" />
-                  <div className="space-y-2">
-                    <CardTitle className="text-h6">
-                      Analysis & Visualizations
-                    </CardTitle>
-                    <CardDescription className="text-body1">
-                      Charts and detailed analysis will appear here as you chat
-                    </CardDescription>
-                    <div className="flex flex-wrap justify-center gap-2 mt-4">
-                      <Badge variant="outline">Bar Charts</Badge>
-                      <Badge variant="outline">Area Charts</Badge>
-                      <Badge variant="outline">Linear Charts</Badge>
-                      <Badge variant="outline">Pie Charts</Badge>
-                    </div>
+              <div className="flex flex-1 flex-col items-center justify-center w-full max-w-2xl mx-auto px-4 py-6">
+                <div className="flex flex-col items-center text-center w-full max-w-md">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-[2px] border bg-muted/40 mb-3">
+                    <ChartColumnBig className="h-4 w-4 text-muted-foreground" />
                   </div>
+                  <CardTitle className="text-[14px] font-semibold">Inspolio&apos;s AI Visualizer</CardTitle>
+                  <CardDescription className="text-[11px] mt-2 leading-relaxed text-muted-foreground">
+                    Charts and detailed analysis will appear here as you chat with
+                    Financial AI Assistant. Ask a question or initialize your portfolio to get started.
+                  </CardDescription>
+                </div>
+                <div className="mt-7 w-full grid grid-cols-1 sm:grid-cols-2 gap-2.5 md:gap-3">
+                  {VISUALIZATION_FEATURES.map(({ icon: Icon, title, description }) => (
+                    <div
+                      key={title}
+                      className="flex flex-col items-center text-center gap-2 rounded-[2px] border bg-muted/15 px-3 py-3"
+                    >
+                      <div className="flex h-8 w-8 items-center justify-center rounded-[2px] border bg-background/90 shadow-sm">
+                        <Icon className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div className="space-y-1.5 max-w-[220px]">
+                        <p className="text-[12px] font-medium leading-tight">{title}</p>
+                        <p className="text-[12px] text-muted-foreground leading-snug">
+                          {description}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </CardContent>
           )}
         </Card>
+        </div>
 
         <ChatInputBar
           ref={chatInputRef}
@@ -2045,7 +2205,7 @@ export default function AIChat() {
               `${messages.filter((m) => m.content !== "thinking").length} messages`,
             ]
               .filter(Boolean)
-              .join(" · ")}
+              .join(", ")}
           </div>
           <input
             ref={exportTitleRef}
@@ -2057,7 +2217,7 @@ export default function AIChat() {
               if (e.key === "Enter" && !generatingPdf) exportMarkdown();
             }}
             className="w-full text-[11px] border rounded px-2 py-1.5 mb-2.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder="Title…"
+            placeholder="Report title"
           />
           <div className="flex gap-2">
             <Button
@@ -2078,8 +2238,8 @@ export default function AIChat() {
             >
               {generatingPdf ? (
                 <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Generating…
+                  <RectLoader size="sm" />
+                  Generating report
                 </>
               ) : (
                 <>

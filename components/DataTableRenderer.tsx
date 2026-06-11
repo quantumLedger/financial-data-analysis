@@ -6,7 +6,7 @@ import { Download } from "lucide-react";
 import type { TableData, TableColumn } from "@/types/chart";
 
 function formatCell(value: any, type: TableColumn["type"]): { text: string; color?: string } {
-  if (value === null || value === undefined) return { text: "—" };
+  if (value === null || value === undefined) return { text: "Not available" };
 
   switch (type) {
     case "currency": {

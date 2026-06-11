@@ -100,7 +100,7 @@ function BarChartComponent({ data }: { data: ChartData }) {
               axisLine={false}
               tickFormatter={(value) => {
                 return value.length > 20
-                  ? `${value.substring(0, 17)}...`
+                  ? value.substring(0, 17)
                   : value;
               }}
             />
@@ -159,7 +159,7 @@ function MultiBarChartComponent({ data }: { data: ChartData }) {
               axisLine={false}
               tickFormatter={(value) => {
                 return value.length > 20
-                  ? `${value.substring(0, 17)}...`
+                  ? value.substring(0, 17)
                   : value;
               }}
             />
@@ -228,7 +228,7 @@ function LineChartComponent({ data }: { data: ChartData }) {
               tickMargin={8}
               tickFormatter={(value) => {
                 return value.length > 20
-                  ? `${value.substring(0, 17)}...`
+                  ? value.substring(0, 17)
                   : value;
               }}
             />
@@ -401,7 +401,7 @@ function AreaChartComponent({
               tickMargin={8}
               tickFormatter={(value) => {
                 return value.length > 20
-                  ? `${value.substring(0, 17)}...`
+                  ? value.substring(0, 17)
                   : value;
               }}
             />

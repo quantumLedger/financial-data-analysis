@@ -65,21 +65,21 @@ const FINSIGHT_TOOL_NAMES = new Set([
 function getFinsightStatusMessage(toolName: string, input: any): string {
   switch (toolName) {
     case "analyze_sec_filing":
-      return `Fetching ${input.filing_type ?? "10-K"} filing for ${input.ticker}...`;
+      return `Fetching ${input.filing_type ?? "10-K"} filing for ${input.ticker}`;
     case "get_earnings_flash":
-      return `Pulling earnings data for ${input.ticker}...`;
+      return `Pulling earnings data for ${input.ticker}`;
     case "find_deal_comps":
-      return `Finding comparable companies for ${input.ticker}...`;
+      return `Finding comparable companies for ${input.ticker}`;
     case "generate_pitch_section":
-      return `Drafting ${input.section_type} section...`;
+      return `Drafting ${input.section_type} section`;
     case "generate_pre_meeting_brief":
-      return `Generating pre-meeting brief for ${input.client_name}...`;
+      return `Generating pre-meeting brief for ${input.client_name}`;
     case "get_morning_brief":
-      return "Fetching today's morning market brief...";
+      return "Fetching the morning market brief for today";
     case "get_portfolio_risk":
-      return "Running portfolio risk analysis...";
+      return "Running portfolio risk analysis";
     default:
-      return "Fetching data...";
+      return "Fetching data";
   }
 }
 
@@ -540,7 +540,7 @@ export async function POST(req: NextRequest) {
             if (clientPortfolioData) {
               stockData = clientPortfolioData;
             } else if (icfData?.firm_name && icfData?.client_id && icfData?.investment_banker_id) {
-              send({ type: "status", message: "Fetching portfolio data..." });
+              send({ type: "status", message: "Fetching portfolio data" });
               try {
                 stockData = await fetchCombinedCSVsByFirm(
                   String(icfData.client_id), String(icfData.investment_banker_id),
@@ -550,7 +550,7 @@ export async function POST(req: NextRequest) {
             }
 
             if (extractedUserQuery.trim()) {
-              send({ type: "status", message: "Searching live market data..." });
+              send({ type: "status", message: "Searching live market data" });
               try {
                 const pd = await retryWithBackoff(async () => {
                   const r = await fetch(`${baseUrl}/api/perplexity`, {
@@ -573,10 +573,10 @@ export async function POST(req: NextRequest) {
           if (includeLiveData && extractedUserQuery && (stockData || perplexityData)) {
             let enhanced = `Original Query: ${extractedUserQuery}\n\n`;
             if (stockData) {
-              enhanced += `---\n**PORTFOLIO DATA (${icfData?.firm_account_name || "Account"} at ${icfData?.firm_name || "Firm"}):**\n${JSON.stringify(stockData, null, 2)}\n---\n\n`;
+              enhanced += `**PORTFOLIO DATA (${icfData?.firm_account_name || "Account"} at ${icfData?.firm_name || "Firm"}):**\n${JSON.stringify(stockData, null, 2)}\n\n`;
             }
             if (perplexityData?.content) {
-              enhanced += `---\n**LIVE MARKET DATA:**\n${perplexityData.content}\n\n**Sources:** ${perplexityData.citationCount} citation(s)\n---\n\n`;
+              enhanced += `**LIVE MARKET DATA:**\n${perplexityData.content}\n\n**Sources:** ${perplexityData.citationCount} citation(s)\n\n`;
             }
             const instructions = [
               ...(stockData ? ["- The current portfolio data provided above"] : []),
@@ -596,12 +596,12 @@ export async function POST(req: NextRequest) {
 
           // ── Step 3: System prompt ──────────────────────────────────────
           const liveCtx = includeLiveData && (stockData || perplexityData)
-            ? `\nDATA CONTEXT:\nYou have real live data in the user's message:\n${stockData ? "- Portfolio/Stock Data: actual current holdings." : ""}\n${perplexityData ? "- Live Web Search Data: latest market information." : ""}\nDo NOT fabricate figures — use only the data provided.\n`
+            ? `\nDATA CONTEXT:\nYou have real live data in the user's message:\n${stockData ? "- Portfolio/Stock Data: actual current holdings." : ""}\n${perplexityData ? "- Live Web Search Data: latest market information." : ""}\nDo NOT fabricate figures. Use only the data provided.\n`
             : "";
 
           const systemPrompt = `You are a senior financial analyst and investment banking research assistant. You help bankers research companies, analyze portfolios, and generate professional client deliverables.
 ${liveCtx}
-RESEARCH CAPABILITIES — call these tools silently when relevant:
+RESEARCH CAPABILITIES. Call these tools silently when relevant:
 - analyze_sec_filing: for company financials, risks, or regulatory questions
 - get_earnings_flash: for earnings performance, beat/miss, guidance
 - find_deal_comps: for comparable company multiples and peer benchmarking
@@ -610,7 +610,7 @@ RESEARCH CAPABILITIES — call these tools silently when relevant:
 - get_morning_brief: for today's market context
 - get_portfolio_risk: for quantitative risk metrics on a portfolio
 
-OUTPUT TOOLS — call these to produce structured deliverables:
+OUTPUT TOOLS. Call these to produce structured deliverables:
 - generate_graph_data: when a chart adds value over text (bar, line, pie, area, multiBar, stackedArea)
 - generate_data_table: when tabular comparison is clearer than a chart (comps tables, allocations, metrics)
 - generate_investment_memo: when the user asks for a memo, report, or formal write-up
@@ -621,13 +621,13 @@ OUTPUT FORMAT:
 - Always respond in Markdown with clear section headings, bullet lists, and tables where useful
 - Reference charts/tables by title in your analysis
 - Use proper financial formatting (numbers, percentages)
-- NEVER say you are using any tool — execute silently
+- NEVER say you are using any tool. Execute silently
 - For memos and narratives, still provide a brief markdown summary in the text response
 
 Focus on clear, actionable financial insights.`;
 
           // ── Step 4: Multi-round agentic loop ───────────────────────────
-          send({ type: "status", message: "Analyzing..." });
+          send({ type: "status", message: "Analyzing request" });
 
           let currentMessages: any[] = anthropicMessages;
           let finalMessage: any = null;
