@@ -1182,19 +1182,50 @@ export default function AIChat() {
     });
   }, []);
 
-  useEffect(() => {
+  const updateChatInputClearance = useCallback(() => {
+    const scrollEl = chatScrollRef.current;
     const form = chatInputFormRef.current;
-    if (!form) return;
-    const measure = () => {
-      const bottomOffset = 20;
-      const gap = 12;
-      setChatInputClearance(form.offsetHeight + bottomOffset + gap);
-    };
+    if (!scrollEl || !form) return;
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const formRect = form.getBoundingClientRect();
+    const gap = 12;
+    const clearance = Math.ceil(scrollRect.bottom - formRect.top + gap);
+    setChatInputClearance(Math.max(clearance, 80));
+  }, []);
+
+  useEffect(() => {
+    const scrollEl = chatScrollRef.current;
+    const form = chatInputFormRef.current;
+    if (!scrollEl || !form) return;
+
+    const measure = () => requestAnimationFrame(updateChatInputClearance);
+
     measure();
     const observer = new ResizeObserver(measure);
+    observer.observe(scrollEl);
     observer.observe(form);
-    return () => observer.disconnect();
-  }, [currentUpload, isLoading, isUploading]);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [
+    updateChatInputClearance,
+    currentUpload,
+    isLoading,
+    isUploading,
+    leftPanelWidth,
+    isResizing,
+  ]);
+
+  useEffect(() => {
+    scrollChatToBottom("auto");
+  }, [chatInputClearance, scrollChatToBottom]);
+
+  useEffect(() => {
+    const t = setTimeout(updateChatInputClearance, 0);
+    return () => clearTimeout(t);
+  }, [messages.length, updateChatInputClearance]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => scrollChatToBottom("smooth"), 50);
@@ -2040,13 +2071,9 @@ export default function AIChat() {
 
           <CardContent
             ref={chatScrollRef}
-            className="flex flex-1 flex-col overflow-y-auto p-4 scroll-smooth relative z-[6] min-h-0"
-            style={{
-              paddingBottom: chatInputClearance,
-              scrollPaddingBottom: chatInputClearance,
-            }}
+            className="chat-scroll flex-1 overflow-y-auto p-4 scroll-smooth relative z-[6] min-h-0"
           >
-            <div className="relative flex flex-1 flex-col min-h-0">
+            <div className="relative">
             {visibleMessages.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center animate-fade-in-up w-full max-w-sm mx-auto px-2">
                 <h2 className="text-[19px] font-medium text-center mb-6 w-full">
@@ -2114,7 +2141,7 @@ export default function AIChat() {
                 </div>
               </div>
             ) : (
-              <div className="space-y-4 min-h-full" data-chat-messages>
+              <div className="space-y-4" data-chat-messages>
                 {visibleMessages.map((message, index) => (
                   <div
                     key={message.id}
@@ -2145,7 +2172,12 @@ export default function AIChat() {
                       )}
                   </div>
                 ))}
-                <div ref={messagesEndRef} className="h-4" />
+                <div
+                  ref={messagesEndRef}
+                  aria-hidden
+                  className="shrink-0 pointer-events-none"
+                  style={{ height: chatInputClearance }}
+                />
               </div>
             )}
             </div>
