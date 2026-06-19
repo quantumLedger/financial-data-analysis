@@ -917,6 +917,8 @@ export default function AIChat() {
   /** Synchronous guard that prevents a second request starting while one is in flight,
    *  even if React hasn't flushed the isLoading state update yet. */
   const isInFlightRef = useRef(false);
+  /** Prevents bootstrap loadConversation from overwriting an active stream's charts. */
+  const streamSessionActiveRef = useRef(false);
 
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -932,6 +934,7 @@ export default function AIChat() {
   const pendingPanelWidthRef = useRef(33.33);
 
   const loadConversation = useCallback(async (convId: string) => {
+    if (streamSessionActiveRef.current || isInFlightRef.current) return;
     setLoadingConversation(true);
     try {
       const res = await fetch(`/api/conversations/${convId}`);
@@ -1084,7 +1087,7 @@ export default function AIChat() {
         if (!res.ok) return;
         const convList: ConversationSummary[] = await res.json();
         setConversations(convList);
-        if (convList.length > 0) {
+        if (convList.length > 0 && !streamSessionActiveRef.current && !isInFlightRef.current) {
           await loadConversation(convList[0].id);
         }
       } catch (err) {
@@ -1412,6 +1415,7 @@ export default function AIChat() {
     async (requestBody: object) => {
       const controller = new AbortController();
       abortControllerRef.current = controller;
+      streamSessionActiveRef.current = true;
 
       try {
         const res = await fetch("/api/finance", {
@@ -1560,6 +1564,7 @@ export default function AIChat() {
         }
         throw err;
       } finally {
+        streamSessionActiveRef.current = false;
         abortControllerRef.current = null;
       }
     },
