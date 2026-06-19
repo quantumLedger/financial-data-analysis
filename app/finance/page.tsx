@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback, useMemo, memo, useImperativeHandle, forwardRef, startTransition } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo, memo, useImperativeHandle, forwardRef } from "react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +33,6 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { ContentModal } from "@/components/ContentModal";
 import { PanelResizer } from "@/components/PanelResizer";
-import { FullPageLoader } from "@/components/FullPageLoader";
 import { MessageDetailContent } from "@/components/MessageDetailContent";
 import {
   sanitizeMessageForDisplay,
@@ -230,6 +229,7 @@ const SafeChartRenderer = memo(function SafeChartRenderer({ data }: { data: Char
 });
 
 const MAX_MSG_HEIGHT = 400;
+const EXPANDED_MSG_MAX_HEIGHT = "min(70vh, 640px)";
 const QUERY_TRUNCATE_LEN = 140;
 
 const VISUALIZATION_FEATURES: {
@@ -324,8 +324,8 @@ const MessageComponent = memo(function MessageComponent({
 }) {
   const isUser = message.role === "user";
   const isThinking = message.content === "thinking";
-  const [readMoreOpen, setReadMoreOpen] = useState(false);
-  const [readMoreLoading, setReadMoreLoading] = useState(false);
+  const [inlineExpanded, setInlineExpanded] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const bubbleInnerRef = useRef<HTMLDivElement>(null);
   const speakerLabel = isUser ? "You" : ASSISTANT_NAME;
@@ -342,72 +342,78 @@ const MessageComponent = memo(function MessageComponent({
     () => getReadMoreLabel(message.content),
     [message.content]
   );
+  const showMessageActions = !isThinking && (overflows || expandable);
 
-  const openReadMore = useCallback(() => {
-    setReadMoreLoading(true);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        startTransition(() => {
-          setReadMoreOpen(true);
-          setReadMoreLoading(false);
-        });
-      });
-    });
-  }, []);
+  useEffect(() => {
+    setInlineExpanded(false);
+    setModalOpen(false);
+  }, [message.content, message.id]);
 
   const timeStr = message.timestamp
     ? new Date(message.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
     : new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 
-  // Detect if bubble content overflows the cap
+  // Detect if bubble content overflows the cap (only while collapsed)
   useEffect(() => {
     const el = bubbleInnerRef.current;
-    if (!el) return;
+    if (!el || inlineExpanded) return;
     const check = () => setOverflows(el.scrollHeight > MAX_MSG_HEIGHT + 8);
     check();
     const ro = new ResizeObserver(check);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [displayContent]);
+  }, [displayContent, inlineExpanded]);
+
+  const actionBtnPrimary =
+    "text-[10px] font-semibold px-3 py-1 rounded-full border border-black bg-black text-white hover:bg-neutral-800 shadow-sm transition-colors";
+  const actionBtnSecondary =
+    "text-[10px] font-semibold px-3 py-1 rounded-full border border-border bg-background text-foreground hover:bg-muted shadow-sm transition-colors";
+
+  const bubbleBody = isThinking ? (
+    <div className="flex items-center gap-2 text-muted-foreground">
+      <RectLoader />
+      <span className="text-[11px]">{message.status ?? "Thinking"}</span>
+    </div>
+  ) : inlineExpanded && expandable ? (
+    <MessageDetailContent
+      content={message.content}
+      isThinking={isThinking}
+      status={message.status}
+    />
+  ) : (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+      {displayContent}
+    </ReactMarkdown>
+  );
 
   /* ── shared bubble + expand/collapse ── */
   const bubble = (
     <div className="relative w-full">
       <div
         ref={bubbleInnerRef}
-        style={{ maxHeight: MAX_MSG_HEIGHT }}
-        className={`overflow-hidden px-3 py-2.5 rounded-lg leading-relaxed break-words ${
+        style={
+          inlineExpanded
+            ? { maxHeight: EXPANDED_MSG_MAX_HEIGHT }
+            : { maxHeight: MAX_MSG_HEIGHT }
+        }
+        className={`px-3 py-2.5 rounded-lg leading-relaxed break-words ${
+          inlineExpanded ? "overflow-y-auto" : "overflow-hidden"
+        } ${
           isUser
             ? "bg-primary text-primary-foreground text-[11px]"
             : "bg-muted/60 border backdrop-blur-sm text-[13.5px]"
         }`}
       >
-        {isThinking ? (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <RectLoader />
-            <span className="text-[11px]">{message.status ?? "Thinking"}</span>
-          </div>
-        ) : (
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-            {displayContent}
-          </ReactMarkdown>
-        )}
+        {bubbleBody}
       </div>
 
-      {overflows && !readMoreOpen && (
+      {!inlineExpanded && overflows && (
         <div
-          className={`absolute bottom-0 left-0 right-0 h-14 flex items-end justify-center pb-2 rounded-b-lg bg-gradient-to-t to-transparent ${
+          className={`pointer-events-none absolute bottom-0 left-0 right-0 h-14 rounded-b-lg bg-gradient-to-t to-transparent ${
             isUser ? "from-primary/90" : "from-muted/95"
           }`}
-        >
-          <button
-            type="button"
-            onClick={openReadMore}
-            className="text-[10px] font-semibold px-3 py-1 rounded-full border border-black bg-black text-white hover:bg-neutral-800 shadow-sm transition-colors"
-          >
-            {readMoreLabel}
-          </button>
-        </div>
+          aria-hidden
+        />
       )}
     </div>
   );
@@ -421,23 +427,31 @@ const MessageComponent = memo(function MessageComponent({
         )}
       </div>
       {bubble}
-      {expandable && !overflows && !readMoreOpen && (
-        <button
-          type="button"
-          onClick={openReadMore}
-          className="mt-1.5 self-center text-[10px] font-semibold px-3 py-1 rounded-full border border-black bg-black text-white hover:bg-neutral-800 shadow-sm transition-colors"
-        >
-          {readMoreLabel}
-        </button>
+      {showMessageActions && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setInlineExpanded((open) => !open)}
+            className={actionBtnPrimary}
+          >
+            {inlineExpanded ? "Wrap" : readMoreLabel}
+          </button>
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className={actionBtnSecondary}
+          >
+            Open in modal
+          </button>
+        </div>
       )}
-      <FullPageLoader open={readMoreLoading} message="Loading your message" />
       <ContentModal
-        open={readMoreOpen}
-        onClose={() => setReadMoreOpen(false)}
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
         title={speakerLabel}
         subtitle={timeStr}
       >
-        {readMoreOpen ? (
+        {modalOpen ? (
           <MessageDetailContent
             content={message.content}
             isThinking={isThinking}
