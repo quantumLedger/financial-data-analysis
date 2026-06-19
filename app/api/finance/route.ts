@@ -522,8 +522,15 @@ export async function POST(req: NextRequest) {
     const encoder = new TextEncoder();
     const sseStream = new ReadableStream({
       async start(controller) {
-        const send = (data: object) =>
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        let streamClosed = false;
+        const send = (data: object) => {
+          if (streamClosed) return;
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          } catch {
+            streamClosed = true;
+          }
+        };
 
         try {
           // ── Step 1: Live data (portfolio + Perplexity) ─────────────────
@@ -627,6 +634,7 @@ Focus on clear, actionable financial insights.`;
           let finalMessage: any = null;
           let roundCount = 0;
           const MAX_ROUNDS = 4;
+          const accumulatedOutputBlocks: any[] = [];
 
           while (roundCount < MAX_ROUNDS) {
             roundCount++;
@@ -660,22 +668,35 @@ Focus on clear, actionable financial insights.`;
             }
 
             const toolBlocks = message.content.filter((c: any) => c.type === "tool_use") as any[];
-            const hasFinsightCalls = toolBlocks.some((b: any) => FINSIGHT_TOOL_NAMES.has(b.name));
+            const finsightBlocks = toolBlocks.filter((b: any) => FINSIGHT_TOOL_NAMES.has(b.name));
+            const outputBlocks = toolBlocks.filter((b: any) => !FINSIGHT_TOOL_NAMES.has(b.name));
+            if (outputBlocks.length > 0) {
+              accumulatedOutputBlocks.push(...outputBlocks);
+            }
 
-            // If no finSightAI calls needed — this is the final round
-            if (message.stop_reason !== "tool_use" || !hasFinsightCalls) {
+            // Final round when Claude is done or only output/delivery tools were called
+            if (message.stop_reason !== "tool_use" || finsightBlocks.length === 0) {
               finalMessage = message;
               break;
             }
 
-            // Execute all tool calls (finSightAI in parallel)
-            send({ type: "status", message: getFinsightStatusMessage(toolBlocks.find((b) => FINSIGHT_TOOL_NAMES.has(b.name))?.name ?? "", toolBlocks[0]?.input ?? {}) });
+            // Execute finSightAI tools; keep output tool payloads from this round
+            send({
+              type: "status",
+              message: getFinsightStatusMessage(
+                finsightBlocks[0]?.name ?? "",
+                finsightBlocks[0]?.input ?? {}
+              ),
+            });
 
             const toolResults = await Promise.all(
               toolBlocks.map(async (block: any) => {
                 if (!FINSIGHT_TOOL_NAMES.has(block.name)) {
-                  // Output tool called mid-loop — return placeholder so Claude continues
-                  return { type: "tool_result", tool_use_id: block.id, content: "{}" };
+                  return {
+                    type: "tool_result",
+                    tool_use_id: block.id,
+                    content: JSON.stringify({ status: "ok" }),
+                  };
                 }
                 try {
                   const result = await callFinsightAPI(block.name, block.input, finsightUserId);
@@ -707,10 +728,11 @@ Focus on clear, actionable financial insights.`;
             rounds: roundCount,
             stopReason: finalMessage.stop_reason,
             contentTypes: (finalMessage.content as any[]).map((c: any) => c.type),
+            outputTools: accumulatedOutputBlocks.map((b: any) => b.name),
           });
 
           // ── Step 5: Process output tool blocks ─────────────────────────
-          const allOutputBlocks = (finalMessage.content as any[]).filter((c: any) => c.type === "tool_use") as any[];
+          const allOutputBlocks = accumulatedOutputBlocks;
 
           const processedCharts: ChartData[] = [];
           const processedTables: TableData[] = [];
@@ -736,6 +758,13 @@ Focus on clear, actionable financial insights.`;
               console.error(`❌ Output tool processing error (${block.name}):`, err);
             }
           }
+
+          console.log("✅ Visual artifacts:", {
+            charts: processedCharts.length,
+            tables: processedTables.length,
+            memos: processedMemos.length,
+            narratives: processedNarratives.length,
+          });
 
           const followUpsBlock = allOutputBlocks.find((b) => b.name === "suggest_follow_ups");
           const followUps: string[] = followUpsBlock?.input?.questions ?? [];
@@ -811,7 +840,12 @@ Focus on clear, actionable financial insights.`;
           console.error("❌ Stream error:", error);
           send({ type: "error", error: error.message || "Streaming error occurred" });
         } finally {
-          controller.close();
+          streamClosed = true;
+          try {
+            controller.close();
+          } catch {
+            /* client may have already closed the stream */
+          }
         }
         },
       });
