@@ -6,6 +6,7 @@ import { retryWithBackoff } from "@/lib/retry";
 import { maybeAlertLlmQuotaForError } from "@/lib/llmQuotaAlarm";
 import { internalApiKeyHeader } from "@/lib/internalApiKey";
 import { resolveAssistantDisplayContent } from "@/lib/assistantMessage";
+import { normalizePieChartData } from "@/lib/chartNormalize";
 import { sanitizeMessageForPersistence } from "@/lib/messageDisplay";
 
 // ─── Portfolio data fetch ────────────────────────────────────────────────────
@@ -218,19 +219,10 @@ function processChartBlock(block: any): ChartData | null {
     throw new Error("Invalid chart data structure");
   }
 
-  if (chartData.chartType === "pie") {
-    chartData.data = chartData.data.map((item: any) => {
-      const valueKey = Object.keys(chartData.chartConfig)[0] ?? "value";
-      const segmentKey = (chartData.config as any).xAxisKey || "segment";
-      return {
-        segment: item[segmentKey] || item.segment || item.category || item.name,
-        value: item[valueKey] ?? item.value,
-      };
-    });
-    (chartData.config as any).xAxisKey = "segment";
-  }
+  const normalizedChart =
+    chartData.chartType === "pie" ? normalizePieChartData(chartData) : chartData;
 
-  const processedChartConfig = Object.entries(chartData.chartConfig).reduce(
+  const processedChartConfig = Object.entries(normalizedChart.chartConfig).reduce(
     (acc, [key, config], index) => ({
       ...acc,
       [key]: { ...(config as Record<string, unknown>), color: `hsl(var(--chart-${index + 1}))` },
@@ -238,7 +230,7 @@ function processChartBlock(block: any): ChartData | null {
     {} as Record<string, unknown>
   );
 
-  return { ...chartData, chartConfig: processedChartConfig as any };
+  return { ...normalizedChart, chartConfig: processedChartConfig as any };
 }
 
 function processTableBlock(block: any): TableData | null {
@@ -298,7 +290,8 @@ const tools: ToolSchema[] = [
   // ── Chart (output) ────────────────────────────────────────────────────────
   {
     name: "generate_graph_data",
-    description: "Generate structured JSON data for creating financial charts and graphs.",
+    description:
+      "Generate structured JSON data for financial charts. For pie charts each data row MUST include a segment label (e.g. sector name) and a numeric value.",
     input_schema: {
       type: "object",
       properties: {

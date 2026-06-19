@@ -28,6 +28,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { normalizePieChartRows } from "@/lib/chartNormalize";
 import type { ChartData } from "@/types/chart";
 
 function downloadChartAsPng(containerEl: HTMLElement, title: string) {
@@ -280,13 +281,12 @@ function PieChartComponent({ data }: { data: ChartData }) {
     return safeData.reduce((acc, curr) => acc + (curr?.value || 0), 0);
   }, [safeData]);
 
-  const chartData = safeData.map((item, index) => {
-    return {
+  const chartData = normalizePieChartRows(safeData, data.config, data.chartConfig).map(
+    (item, index) => ({
       ...item,
-      // Use the same color variable pattern as other charts
       fill: `hsl(var(--chart-${index + 1}))`,
-    };
-  });
+    })
+  );
 
   return (
     <Card className="flex flex-col">
