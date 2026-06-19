@@ -1431,54 +1431,91 @@ export default function AIChat() {
           narratives: NarrativeData[]; followUps: string[]; hasToolUse: boolean;
         } | null = null;
 
+        const applyVisualEvent = (event: {
+          charts?: ChartData[];
+          tables?: TableData[];
+          memos?: MemoData[];
+          narratives?: NarrativeData[];
+          followUps?: string[];
+          hasToolUse?: boolean;
+        }) => {
+          pendingStream = {
+            charts: event.charts ?? [],
+            tables: event.tables ?? [],
+            memos: event.memos ?? [],
+            narratives: event.narratives ?? [],
+            followUps: event.followUps ?? [],
+            hasToolUse: !!event.hasToolUse,
+          };
+          setMessages((prev) => {
+            const out = [...prev];
+            const last = out[out.length - 1];
+            if (!last || last.role !== "assistant") return out;
+            out[out.length - 1] = {
+              ...last,
+              status: undefined,
+              hasToolUse: pendingStream!.hasToolUse,
+              charts: pendingStream!.charts.length > 0 ? pendingStream!.charts : undefined,
+              tables: pendingStream!.tables.length > 0 ? pendingStream!.tables : undefined,
+              memos: pendingStream!.memos.length > 0 ? pendingStream!.memos : undefined,
+              narratives:
+                pendingStream!.narratives.length > 0 ? pendingStream!.narratives : undefined,
+              followUps:
+                pendingStream!.followUps.length > 0 ? pendingStream!.followUps : undefined,
+            };
+            return out;
+          });
+        };
+
+        const processSsePart = (part: string) => {
+          if (!part.startsWith("data: ")) return;
+          let event: any;
+          try {
+            event = JSON.parse(part.slice(6));
+          } catch {
+            return;
+          }
+
+          if (event.type === "status") {
+            setMessages((prev) => {
+              const out = [...prev];
+              out[out.length - 1] = { ...out[out.length - 1], status: event.message };
+              return out;
+            });
+          } else if (event.type === "text") {
+            setMessages((prev) => {
+              const out = [...prev];
+              const last = out[out.length - 1];
+              out[out.length - 1] = {
+                ...last,
+                status: undefined,
+                content:
+                  last.content === "thinking" ? event.text : last.content + event.text,
+              };
+              return out;
+            });
+          } else if (event.type === "chart") {
+            applyVisualEvent(event);
+          } else if (event.type === "error") {
+            throw new Error(event.error || "Streaming error");
+          }
+        };
+
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() ?? "";
-
-          for (const part of parts) {
-            if (!part.startsWith("data: ")) continue;
-            let event: any;
-            try {
-              event = JSON.parse(part.slice(6));
-            } catch {
-              continue;
-            }
-
-            if (event.type === "status") {
-              setMessages((prev) => {
-                const out = [...prev];
-                out[out.length - 1] = { ...out[out.length - 1], status: event.message };
-                return out;
-              });
-            } else if (event.type === "text") {
-              setMessages((prev) => {
-                const out = [...prev];
-                const last = out[out.length - 1];
-                out[out.length - 1] = {
-                  ...last,
-                  status: undefined,
-                  content:
-                    last.content === "thinking" ? event.text : last.content + event.text,
-                };
-                return out;
-              });
-            } else if (event.type === "chart") {
-              pendingStream = {
-                charts: event.charts ?? [],
-                tables: event.tables ?? [],
-                memos: event.memos ?? [],
-                narratives: event.narratives ?? [],
-                followUps: event.followUps ?? [],
-                hasToolUse: !!event.hasToolUse,
-              };
-            } else if (event.type === "error") {
-              throw new Error(event.error || "Streaming error");
-            }
+          if (value) {
+            buffer += decoder.decode(value, { stream: !done });
           }
+
+          const parts = buffer.split("\n\n");
+          const completeParts = done ? parts : parts.slice(0, -1);
+          buffer = done ? "" : (parts[parts.length - 1] ?? "");
+
+          for (const part of completeParts) {
+            processSsePart(part);
+          }
+
+          if (done) break;
         }
 
         // Apply visual artifacts and resolve display text after stream ends
